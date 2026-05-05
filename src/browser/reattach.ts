@@ -13,6 +13,7 @@ import {
 import type {
   BrowserAutomationConfig,
   BrowserLogger,
+  BrowserRunOptions,
   BrowserRuntimeMetadata,
   ChromeClient,
 } from "./types.js";
@@ -58,12 +59,14 @@ export interface ReattachDeps {
     config: BrowserSessionConfig | undefined,
   ) => Promise<ReattachResult>;
   promptPreview?: string;
+  afterAnswerCb?: BrowserRunOptions["afterAnswerCb"];
 }
 
 export interface ReattachResult {
   answerText: string;
   answerMarkdown: string;
   chromeMode: "reused_devtools" | "relaunched";
+  keepBrowserOpen?: boolean;
 }
 
 export async function resumeBrowserSession(
@@ -133,7 +136,7 @@ export async function resumeBrowserSession(
             close: async () => undefined,
           } as const);
     const client: ChromeClient = connection.client;
-    const { Runtime, DOM } = client;
+    const { Runtime, DOM, Page, Input } = client;
     if (Runtime?.enable) {
       await Runtime.enable();
     }
@@ -201,6 +204,15 @@ export async function resumeBrowserSession(
         "Reattach markdown capture timed out",
       )) ?? recovered.text;
     const aligned = alignPromptEchoMarkdown(recovered.text, markdown, promptEcho, logger);
+    const afterAnswerResult = await deps.afterAnswerCb?.({
+      Runtime,
+      Page,
+      Input,
+      answer: {
+        text: aligned.answerText,
+        markdown: aligned.answerMarkdown,
+      },
+    });
 
     await connection.close().catch(() => undefined);
 
@@ -208,6 +220,7 @@ export async function resumeBrowserSession(
       answerText: aligned.answerText,
       answerMarkdown: aligned.answerMarkdown,
       chromeMode: "reused_devtools",
+      keepBrowserOpen: afterAnswerResult?.keepBrowserOpen,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -371,6 +384,15 @@ async function resumeBrowserSessionViaNewChrome(
   );
   const markdown = (await captureMarkdown(Runtime, recovered.meta, logger)) ?? recovered.text;
   const aligned = alignPromptEchoMarkdown(recovered.text, markdown, promptEcho, logger);
+  const afterAnswerResult = await deps.afterAnswerCb?.({
+    Runtime,
+    Page,
+    Input: client.Input,
+    answer: {
+      text: aligned.answerText,
+      markdown: aligned.answerMarkdown,
+    },
+  });
 
   if (client && typeof client.close === "function") {
     try {
@@ -379,7 +401,7 @@ async function resumeBrowserSessionViaNewChrome(
       // ignore
     }
   }
-  if (!resolved.keepBrowser) {
+  if (!resolved.keepBrowser && !afterAnswerResult?.keepBrowserOpen) {
     try {
       await closeChromeGracefully(chrome, logger);
     } catch {
@@ -398,6 +420,7 @@ async function resumeBrowserSessionViaNewChrome(
     answerText: aligned.answerText,
     answerMarkdown: aligned.answerMarkdown,
     chromeMode: "relaunched",
+    keepBrowserOpen: afterAnswerResult?.keepBrowserOpen,
   };
 }
 

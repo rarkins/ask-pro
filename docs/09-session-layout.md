@@ -69,7 +69,7 @@ Example:
     }
   ],
   "redaction": {
-    "mode": "strict",
+    "mode": "best_effort",
     "findings": []
   }
 }

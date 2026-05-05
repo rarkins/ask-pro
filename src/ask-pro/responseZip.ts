@@ -15,7 +15,7 @@ const REQUIRED_RESPONSE_FILES = [
 export interface AskProResponseZipManifest {
   schemaVersion: 1;
   responseZip: {
-    status: "downloaded" | "unavailable" | "invalid" | "error";
+    status: "downloaded" | "unavailable" | "invalid" | "error" | "not_requested";
     actualFileName: string | null;
     downloadPath: string | null;
     extractPath: string | null;

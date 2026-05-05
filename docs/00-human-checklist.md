@@ -45,7 +45,7 @@ ask-pro "Return exactly ASK_PRO_BROWSER_OK."
 For generated-zip behavior, approve one test with a harmless prompt:
 
 ```bash
-ask-pro "Create a tiny implementation plan and, if file generation is available, a zip named ask-pro-response.zip containing IMPLEMENTATION_PLAN.md."
+ask-pro --artifacts "Create a tiny implementation plan with IMPLEMENTATION_PLAN.md."
 ```
 
 ## Publish decision

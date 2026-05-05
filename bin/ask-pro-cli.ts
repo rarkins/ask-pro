@@ -14,6 +14,7 @@ import {
 } from "../src/ask-pro/session.js";
 import {
   AskProNeedsAuthError,
+  isSuspiciousPreambleAnswer,
   resumeAskProBrowserSession,
   runAskProBrowserSession,
 } from "../src/ask-pro/browserRunner.js";
@@ -92,10 +93,31 @@ async function runAskPro(question: string, options: AskProOptions): Promise<void
     return;
   }
   if (options.harvest !== undefined) {
-    const result = await readAskProAnswer({ cwd, sessionId: optionSessionId(options.harvest) });
+    const { status } = await readAskProStatus({
+      cwd,
+      sessionId: optionSessionId(options.harvest),
+    });
+    if (!isAnswerBearingStatus(status)) {
+      const recoverable = await readRecoverableCapturedAnswer(cwd, status);
+      if (recoverable !== null) {
+        await writeStdout(recoverable);
+        try {
+          await updateAskProStatus({ cwd, sessionId: status.sessionId, status: "HARVESTED" });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`ask-pro harvest status update failed: ${message}`);
+        }
+        return;
+      }
+      printStatusRecord(status, await readBrowserPreflight(cwd, status));
+      return;
+    }
+    const result = await readAskProAnswer({ cwd, sessionId: status.sessionId });
     await writeStdout(result.answer);
     try {
-      await updateAskProStatus({ cwd, sessionId: result.sessionId, status: "HARVESTED" });
+      if (status.status !== "HARVESTED") {
+        await updateAskProStatus({ cwd, sessionId: result.sessionId, status: "HARVESTED" });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`ask-pro harvest status update failed: ${message}`);
@@ -150,11 +172,12 @@ async function runAskPro(question: string, options: AskProOptions): Promise<void
   });
   const resumeCommand = buildResumeCommand(session.id, options, cwd);
   const harvestCommand = buildHarvestCommand(session.id, cwd);
+  let currentStatus = session.status;
   if (
     resumeCommand !== session.status.resumeCommand ||
     harvestCommand !== session.status.harvestCommand
   ) {
-    await updateAskProResumeCommand({
+    currentStatus = await updateAskProResumeCommand({
       cwd,
       sessionId: session.id,
       resumeCommand,
@@ -162,11 +185,9 @@ async function runAskPro(question: string, options: AskProOptions): Promise<void
       thinkingTime: options.extended ? "extended" : undefined,
       temporary: options.temporary,
     });
-    session.status.resumeCommand = resumeCommand;
-    session.status.harvestCommand = harvestCommand;
   }
   if (dryRun) {
-    printStatusRecord(session.status, { files: session.manifest.includedFiles.length });
+    printStatusRecord(currentStatus, { files: session.manifest.includedFiles.length });
     return;
   }
   await submitOrResumeBrowserSession(cwd, session.id, options);
@@ -463,6 +484,30 @@ function answerExtraForStatus(status: AskProStatusFile, sessionId: string): AskP
 
 function isAnswerBearingStatus(status: AskProStatusFile): boolean {
   return ["COMPLETED", "READY_TO_HARVEST", "HARVESTED"].includes(status.status);
+}
+
+async function readRecoverableCapturedAnswer(
+  cwd: string,
+  status: AskProStatusFile,
+): Promise<string | null> {
+  if (status.status === "INCOMPLETE_ANSWER") {
+    return null;
+  }
+  try {
+    const { answer } = await readAskProAnswer({ cwd, sessionId: status.sessionId });
+    return isPlaceholderAnswer(answer) || isSuspiciousPreambleAnswer(answer) ? null : answer;
+  } catch {
+    return null;
+  }
+}
+
+function isPlaceholderAnswer(answer: string): boolean {
+  const normalized = answer.trim().toLowerCase();
+  return (
+    normalized.length === 0 ||
+    normalized === "# dry run\n\nno browser submission was performed." ||
+    normalized === "# pending\n\nbrowser submission is not wired in this slice."
+  );
 }
 
 async function readBrowserPreflight(

@@ -71,9 +71,11 @@ Debug logs must redact cookies and bearer tokens.
 
 ## Browser modes
 
-The `ask-pro` CLI uses deterministic managed profiles and locks for new runs.
-Resume may reattach to saved browser runtime metadata when a session already
-has it.
+The `ask-pro` CLI uses deterministic managed profiles. Browser-profile locks are
+a runtime guard around managed Chrome use; they are not a full orchestration
+queue for multiple agents. For true concurrent lanes, prefer stable
+`ASK_PRO_AGENT_ID` values so each lane gets its own profile. Resume may reattach
+to saved browser runtime metadata when a session already has it.
 
 1. persistent automation profile at `~/.agents/skills/ask-pro/browser-profile`
    for default runs, or

@@ -6,6 +6,7 @@ import {
   createAskProSession,
   readAskProAnswer,
   readAskProStatus,
+  updateAskProStatus,
 } from "../../src/ask-pro/session.js";
 
 const tempDirs: string[] = [];
@@ -35,6 +36,7 @@ describe("ask-pro sessions", () => {
     expect(session.manifest.includedFiles).toEqual([
       { path: "src/example.ts", reason: "Matched by --files pattern." },
     ]);
+    expect(session.manifest.redaction.mode).toBe("best_effort");
 
     const files = await fs.readdir(session.dir);
     expect(files).toEqual(
@@ -233,5 +235,32 @@ describe("ask-pro sessions", () => {
 
     const answer = await readAskProAnswer({ cwd, sessionId: session.id });
     expect(answer.answer).toContain("No browser submission");
+  });
+
+  test("clears stale reason when a later status has no reason", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-session-reason-"));
+    tempDirs.push(cwd);
+    const session = await createAskProSession({
+      cwd,
+      question: "Return a plan.",
+      filePatterns: [],
+      dryRun: true,
+    });
+
+    await updateAskProStatus({
+      cwd,
+      sessionId: session.id,
+      status: "WAIT_TIMED_OUT",
+      reason: "assistant_timeout",
+    });
+    const completed = await updateAskProStatus({
+      cwd,
+      sessionId: session.id,
+      status: "COMPLETED",
+    });
+
+    expect(completed).not.toHaveProperty("reason");
+    const { status } = await readAskProStatus({ cwd, sessionId: session.id });
+    expect(status).not.toHaveProperty("reason");
   });
 });

@@ -21,6 +21,17 @@ const runBrowserModeMock = vi.fn(async () => ({
   browserTransport: "launched",
 }));
 const closeTabMock = vi.fn(async () => undefined);
+const harvestLatestAssistantZipMock = vi.fn(async () => ({
+  schemaVersion: 1 as const,
+  responseZip: {
+    status: "unavailable" as const,
+    actualFileName: null,
+    downloadPath: null,
+    extractPath: null,
+    requiredFilesPresent: false,
+    notes: ["No zip."],
+  },
+}));
 
 vi.mock("../../src/browser/reattach.js", () => ({
   resumeBrowserSession: resumeBrowserSessionMock,
@@ -31,6 +42,13 @@ vi.mock("../../src/browserMode.js", () => ({
 vi.mock("../../src/browser/chromeLifecycle.js", () => ({
   closeTab: closeTabMock,
 }));
+vi.mock("../../src/ask-pro/responseZip.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/ask-pro/responseZip.js")>();
+  return {
+    ...actual,
+    harvestLatestAssistantZip: harvestLatestAssistantZipMock,
+  };
+});
 
 const { AskProNeedsAuthError, resumeAskProBrowserSession, runAskProBrowserSession } =
   await import("../../src/ask-pro/browserRunner.js");
@@ -41,6 +59,7 @@ afterEach(async () => {
   resumeBrowserSessionMock.mockClear();
   runBrowserModeMock.mockClear();
   closeTabMock.mockClear();
+  harvestLatestAssistantZipMock.mockClear();
   vi.unstubAllEnvs();
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
@@ -184,6 +203,79 @@ describe("ask-pro browser runner", () => {
     expect(result).toEqual({ keepBrowserOpen: true });
   });
 
+  test("does not harvest response zip for inline-default sessions", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-run-inline-no-zip-"));
+    tempDirs.push(cwd);
+    const session = await createAskProSession({
+      cwd,
+      question: "Give the actual answer.",
+      filePatterns: [],
+      dryRun: false,
+    });
+
+    await runAskProBrowserSession({ cwd, sessionId: session.id });
+    const firstCall = runBrowserModeMock.mock.calls[0] as unknown[] | undefined;
+    const options = firstCall?.[0] as
+      | {
+          afterAnswerCb?: (context: {
+            Runtime: unknown;
+            Page: unknown;
+            Input: unknown;
+            answer: { text: string; markdown: string };
+          }) => Promise<unknown>;
+        }
+      | undefined;
+    await options?.afterAnswerCb?.({
+      Runtime: undefined,
+      Page: undefined,
+      Input: undefined,
+      answer: { text: "# Agent\n", markdown: "# Agent\n" },
+    });
+
+    expect(harvestLatestAssistantZipMock).not.toHaveBeenCalled();
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(session.dir, "PRO_OUTPUT_MANIFEST.json"), "utf8"),
+    );
+    expect(manifest.responseZip.status).toBe("not_requested");
+  });
+
+  test("harvests response zip only when artifacts are requested", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-run-artifacts-zip-"));
+    tempDirs.push(cwd);
+    const session = await createAskProSession({
+      cwd,
+      question: "Return an implementation package.",
+      filePatterns: [],
+      dryRun: false,
+      artifacts: true,
+    });
+
+    await runAskProBrowserSession({ cwd, sessionId: session.id });
+    const firstCall = runBrowserModeMock.mock.calls[0] as unknown[] | undefined;
+    const options = firstCall?.[0] as
+      | {
+          afterAnswerCb?: (context: {
+            Runtime: unknown;
+            Page: unknown;
+            Input: unknown;
+            answer: { text: string; markdown: string };
+          }) => Promise<unknown>;
+        }
+      | undefined;
+    await options?.afterAnswerCb?.({
+      Runtime: undefined,
+      Page: undefined,
+      Input: undefined,
+      answer: { text: "# Agent\n", markdown: "# Agent\n" },
+    });
+
+    expect(harvestLatestAssistantZipMock).toHaveBeenCalledTimes(1);
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(session.dir, "PRO_OUTPUT_MANIFEST.json"), "utf8"),
+    );
+    expect(manifest.responseZip.status).toBe("unavailable");
+  });
+
   test("marks broader deferred-work preambles incomplete when no response zip exists", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-run-incomplete-broad-"));
     tempDirs.push(cwd);
@@ -324,6 +416,20 @@ describe("ask-pro browser runner", () => {
     });
     const log = await fs.readFile(path.join(session.dir, "log.txt"), "utf8");
     expect(log).toContain("Temporary Chat did not expose the Pro model");
+    const { status } = await readAskProStatus({ cwd, sessionId: session.id });
+    expect(status).toMatchObject({
+      status: "COMPLETED",
+      temporary: false,
+      resumeCommand: expect.stringContaining("--no-temporary --resume"),
+    });
+    expect(status).not.toHaveProperty("reason");
+    const metadata = JSON.parse(
+      await fs.readFile(path.join(session.dir, "browser.json"), "utf8"),
+    ) as { temporary?: boolean; url?: string };
+    expect(metadata).toMatchObject({
+      temporary: false,
+      url: "https://chatgpt.com/",
+    });
   });
 
   test("closes the failed temporary chat tab before falling back", async () => {
@@ -361,6 +467,12 @@ describe("ask-pro browser runner", () => {
       expect.any(Function),
       "127.0.0.1",
     );
+    const metadata = JSON.parse(
+      await fs.readFile(path.join(session.dir, "browser.json"), "utf8"),
+    ) as { temporary?: boolean; url?: string; runtime?: { chromeTargetId?: string } };
+    expect(metadata.temporary).toBe(false);
+    expect(metadata.url).toBe("https://chatgpt.com/");
+    expect(metadata.runtime?.chromeTargetId).not.toBe("temp-target");
   });
 
   test("falls back to normal ChatGPT when default Temporary Chat lacks the model picker", async () => {
@@ -726,7 +838,128 @@ describe("ask-pro browser runner", () => {
     const manifest = JSON.parse(
       await fs.readFile(path.join(session.dir, "PRO_OUTPUT_MANIFEST.json"), "utf8"),
     );
+    expect(manifest.responseZip.status).toBe("not_requested");
+  });
+
+  test("reattach harvests response zip for artifact sessions", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-artifacts-"));
+    tempDirs.push(cwd);
+    const session = await createAskProSession({
+      cwd,
+      question: "Review the saved artifact browser session.",
+      filePatterns: [],
+      dryRun: false,
+      artifacts: true,
+    });
+    await writeAskProBrowserMetadata({
+      cwd,
+      sessionId: session.id,
+      metadata: {
+        schemaVersion: 1,
+        status: "running",
+        profileDir: path.join(cwd, "profile"),
+        runtime: {
+          chromePort: 9222,
+          chromeHost: "127.0.0.1",
+          tabUrl: "https://chatgpt.com/c/test",
+        },
+      },
+    });
+    await updateAskProStatus({ cwd, sessionId: session.id, status: "WAIT_TIMED_OUT" });
+    resumeBrowserSessionMock.mockImplementationOnce(async (...args: unknown[]) => {
+      const deps = args[3] as
+        | {
+            afterAnswerCb?: (context: {
+              Runtime: unknown;
+              Page: unknown;
+              Input: unknown;
+              answer: { text: string; markdown: string };
+            }) => Promise<unknown>;
+          }
+        | undefined;
+      await deps?.afterAnswerCb?.({
+        Runtime: undefined,
+        Page: undefined,
+        Input: undefined,
+        answer: { text: "# Reattached\n", markdown: "# Reattached\n" },
+      });
+      return {
+        answerText: "reattached answer",
+        answerMarkdown: "# Reattached\n",
+        chromeMode: "reused_devtools",
+      };
+    });
+
+    await resumeAskProBrowserSession({ cwd, sessionId: session.id });
+
+    expect(harvestLatestAssistantZipMock).toHaveBeenCalledTimes(1);
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(session.dir, "PRO_OUTPUT_MANIFEST.json"), "utf8"),
+    );
     expect(manifest.responseZip.status).toBe("unavailable");
+  });
+
+  test("reattach keeps markdown answer when artifact post-processing fails", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-artifact-error-"));
+    tempDirs.push(cwd);
+    const session = await createAskProSession({
+      cwd,
+      question: "Review the saved artifact browser session.",
+      filePatterns: [],
+      dryRun: false,
+      artifacts: true,
+    });
+    await writeAskProBrowserMetadata({
+      cwd,
+      sessionId: session.id,
+      metadata: {
+        schemaVersion: 1,
+        status: "running",
+        profileDir: path.join(cwd, "profile"),
+        runtime: {
+          chromePort: 9222,
+          chromeHost: "127.0.0.1",
+          tabUrl: "https://chatgpt.com/c/test",
+        },
+      },
+    });
+    await updateAskProStatus({ cwd, sessionId: session.id, status: "WAIT_TIMED_OUT" });
+    harvestLatestAssistantZipMock.mockRejectedValueOnce(new Error("download failed"));
+    resumeBrowserSessionMock.mockImplementationOnce(async (...args: unknown[]) => {
+      const deps = args[3] as
+        | {
+            afterAnswerCb?: (context: {
+              Runtime: unknown;
+              Page: unknown;
+              Input: unknown;
+              answer: { text: string; markdown: string };
+            }) => Promise<unknown>;
+          }
+        | undefined;
+      await deps?.afterAnswerCb?.({
+        Runtime: undefined,
+        Page: undefined,
+        Input: undefined,
+        answer: { text: "# Reattached\n", markdown: "# Reattached\n" },
+      });
+      return {
+        answerText: "reattached answer",
+        answerMarkdown: "# Reattached\n",
+        chromeMode: "reused_devtools",
+      };
+    });
+
+    await resumeAskProBrowserSession({ cwd, sessionId: session.id });
+
+    expect(resumeBrowserSessionMock).toHaveBeenCalledTimes(1);
+    const { status } = await readAskProStatus({ cwd, sessionId: session.id });
+    expect(status.status).toBe("COMPLETED");
+    const answer = await readAskProAnswer({ cwd, sessionId: session.id });
+    expect(answer.answer).toBe("# Reattached\n");
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(session.dir, "PRO_OUTPUT_MANIFEST.json"), "utf8"),
+    );
+    expect(manifest.responseZip.status).toBe("error");
   });
 
   test("reattach preserves recorded extended thinking", async () => {

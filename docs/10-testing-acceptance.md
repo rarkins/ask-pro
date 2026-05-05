@@ -62,8 +62,8 @@ Expected:
 Use a small harmless file:
 
 ```bash
-echo "attachment smoke" > /tmp/ask-pro-smoke.txt
-ask-pro --files /tmp/ask-pro-smoke.txt "Read the attached file and return exactly ATTACHMENT_OK."
+echo "attachment smoke" > .ask-pro-smoke.txt
+ask-pro --files .ask-pro-smoke.txt "Read the attached file and return exactly ATTACHMENT_OK."
 ```
 
 Expected:
@@ -75,7 +75,7 @@ Expected:
 ## Response zip smoke
 
 ```bash
-ask-pro "Create a minimal implementation bundle. If file generation is available, create ask-pro-response.zip containing IMPLEMENTATION_PLAN.md and TASKS.json."
+ask-pro --artifacts "Create a minimal implementation bundle with IMPLEMENTATION_PLAN.md and TASKS.json."
 ```
 
 Expected:
@@ -100,7 +100,7 @@ V1 is done when all are true:
 - The tool writes `ANSWER.md`.
 - Normal CLI stdout is compact agent telemetry; browser progress goes to stderr.
 - `ask-pro --harvest` prints raw `ANSWER.md` content.
-- The tool attempts generated zip download/extract/validate.
+- With `--artifacts`, the tool attempts generated zip download/extract/validate.
 - Markdown fallback works if no zip exists.
 - API/Gemini/MCP/image/TUI/Project Sources/Deep Research are removed or de-scoped.
 - Build and relevant tests pass.

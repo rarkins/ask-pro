@@ -82,7 +82,7 @@ Risk: repo bundle includes secrets.
 
 Mitigation:
 
-- strict default redaction
+- best-effort redaction plus conservative default excludes
 - exclude `.env`, keys, build dirs
 - test redaction fixtures
 - log redaction without leaking values

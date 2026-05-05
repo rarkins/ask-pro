@@ -238,8 +238,8 @@ Useful options:
 | `--dry-run`              | Create the session and `CONTEXT.zip` without opening ChatGPT.           |
 | `--resume [session-id]`  | Resume the latest or selected prepared/waiting session.                 |
 | `--status [session-id]`  | Show the latest or selected session status.                             |
-| `--harvest [session-id]` | Print harvested `ANSWER.md`.                                            |
-| `--copy [session-id]`    | Print the session prompt/copy target for manual fallback.               |
+| `--harvest [session-id]` | Print `ANSWER.md` only for answer-bearing sessions; else print status.  |
+| `--copy [session-id]`    | Print `ANSWER.md` path for answer-bearing sessions, else status.        |
 | `--extended`             | Request Extended Pro thinking for deep, multi-hour escalations.         |
 | `--temporary`            | Require ChatGPT Temporary Chat; fail instead of falling back.           |
 | `--no-temporary`         | Start or resume outside Temporary Chat.                                 |
@@ -309,10 +309,11 @@ agents deciding whether a run is using the shared profile, an isolated agent
 profile, a saved DevTools session, the expected English browser steering, or a
 recoverable non-temporary ChatGPT conversation.
 
-Generated response zips are harvested when ChatGPT provides them. The wrapper no
-longer asks for a zip by default; pass `--artifacts` / `--response-zip` only
-when a structured implementation bundle is useful. If no zip is available, use
-`ask-pro --harvest <session-id>` to print the markdown answer.
+Generated response zips are harvested only for `--artifacts` /
+`--response-zip` sessions. The wrapper no longer asks for a zip by default; use
+those flags only when a structured implementation bundle is useful. For normal
+inline advisory runs, use `ask-pro --harvest <session-id>` to print the markdown
+answer.
 
 Completed sessions close the isolated run tab/browser by design. If the capture
 looks like a deferred-work preamble instead of a real answer, `ask-pro` marks the
@@ -353,9 +354,10 @@ Generated session data is ignored by git.
 
 ## Response Zip
 
-Markdown is always the fallback. If the Pro answer exposes a `.zip` link,
-`ask-pro` downloads it in the browser context, validates it, extracts it under
-`pro-output/`, and writes `PRO_OUTPUT_MANIFEST.json`.
+Markdown is always the default output. If `--artifacts` / `--response-zip` is
+set and the Pro answer exposes a `.zip` link, `ask-pro` downloads it in the
+browser context, validates it, extracts it under `pro-output/`, and writes
+`PRO_OUTPUT_MANIFEST.json`.
 
 The expected generated zip contract is:
 

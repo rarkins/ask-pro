@@ -29,7 +29,7 @@ ask-pro waits with heartbeat/reattach
   ↓
 ask-pro harvests markdown answer
   ↓
-ask-pro downloads ask-pro-response.zip if generated
+if --artifacts was requested, ask-pro downloads ask-pro-response.zip if generated
   ↓
 Agent converts output into implementation plan
 ```
@@ -52,19 +52,11 @@ ask-pro "<question/task>"
 
 The agent writes the prompt. `ask-pro` may validate the prompt and warn if it is too vague, but it should not replace the prompt with a rigid template.
 
-## Prompt quality validation
+## Prompt quality guidance
 
-Return `PROMPT_TOO_VAGUE` if the prompt lacks multiple critical parts:
-
-```json
-{
-  "status": "PROMPT_TOO_VAGUE",
-  "missing": ["decision_question", "constraints", "expected_output"],
-  "suggestion": "Rewrite the prompt before submitting to ChatGPT Pro."
-}
-```
-
-Do not over-police. The goal is useful escalation, not perfect formality.
+The CLI does not reject vague prompts today. Agents should still make prompts
+specific before submission: name the decision question, constraints, files
+attached, validation status, and expected output shape.
 
 ## Auth gate
 

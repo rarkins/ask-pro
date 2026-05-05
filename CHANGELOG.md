@@ -36,6 +36,8 @@
   treating npm as the current install path.
 - Recommend `--no-temporary` for repo advisories, review rounds, large bundles,
   and recoverability-sensitive runs.
+- Mark context redaction as best-effort in manifests and docs instead of
+  overstating strict secret safety.
 
 ### Added
 
@@ -60,6 +62,19 @@
 
 ### Fixed
 
+- CLI: make `--harvest` status-aware so it does not print placeholder answers
+  or mark non-answer-bearing sessions as harvested.
+- CLI: keep `--harvest` able to recover a real captured `ANSWER.md` when later
+  status bookkeeping is stale.
+- CLI: make dry-run stdout reflect persisted `--extended`, `--temporary`, and
+  `--no-temporary` status fields after resume-command updates.
+- Browser: skip response-zip harvesting for inline-default sessions and record
+  `responseZip.status = "not_requested"` when artifacts were not requested.
+- Browser: preserve response-zip harvesting when an artifact session completes
+  through `--resume`.
+- Browser: persist default Temporary Chat fallback to normal ChatGPT in session
+  status, browser metadata, and stored resume commands, and clear stale status
+  reasons after successful transitions.
 - Browser: recognize ChatGPT's composer-pill model picker and Configure /
   `Pro thinking effort` dialog.
 - Browser: harden Pro model selection when ChatGPT keeps the composer pill on
