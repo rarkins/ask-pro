@@ -39,7 +39,7 @@ export interface AskProManifest {
   includedFiles: AskProIncludedFile[];
   excludedFiles: AskProExcludedFile[];
   redaction: {
-    mode: "strict";
+    mode: "best_effort";
     findings: string[];
   };
 }
@@ -134,7 +134,7 @@ export async function createAskProSession({
     includedFiles: collected.includedFiles,
     excludedFiles: collected.excludedFiles,
     redaction: {
-      mode: "strict",
+      mode: "best_effort",
       findings: redactionFindings,
     },
   };
@@ -221,19 +221,23 @@ export async function updateAskProStatus({
   sessionId,
   status,
   reason,
+  temporary,
 }: {
   cwd: string;
   sessionId: string;
   status: AskProStatus;
   reason?: string;
+  temporary?: boolean;
 }): Promise<AskProStatusFile> {
   const paths = getAskProSessionPaths(cwd, sessionId);
   const current = JSON.parse(await fs.readFile(paths.status, "utf8")) as AskProStatusFile;
+  const { reason: _currentReason, ...currentWithoutReason } = current;
   const next: AskProStatusFile = {
-    ...current,
+    ...currentWithoutReason,
     status,
     updatedAt: new Date().toISOString(),
     ...(reason ? { reason } : {}),
+    ...(temporary !== undefined ? { temporary } : {}),
   };
   await fs.writeFile(paths.status, `${JSON.stringify(next, null, 2)}\n`, "utf8");
   await appendAskProLog(cwd, sessionId, `status=${status}${reason ? ` reason=${reason}` : ""}`);
@@ -385,7 +389,7 @@ async function collectContextFiles({
   );
   const excludedFiles = DEFAULT_EXCLUDES.map((entry) => ({
     path: entry,
-    reason: "Default strict exclude.",
+    reason: "Default safety exclude.",
   }));
   return { includedFiles, excludedFiles };
 }
@@ -540,7 +544,7 @@ ${included}
 
 ## Redaction
 
-Mode: strict
+Mode: best_effort
 
 Findings: ${manifest.redaction.findings.length}
 `;

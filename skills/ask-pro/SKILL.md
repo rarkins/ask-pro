@@ -100,9 +100,12 @@ isolated agent profile, saved DevTools state, and English browser steering.
 When present, `conversation_url` is a recoverable non-temporary ChatGPT
 conversation URL.
 
-`ask-pro --harvest <session-id>` prints the raw markdown answer. If ChatGPT also
-provided `ask-pro-response.zip`, files are extracted under the session's
-`pro-output/` directory and described in `PRO_OUTPUT_MANIFEST.json`.
+`ask-pro --harvest <session-id>` prints the raw markdown answer only for
+answer-bearing states such as `COMPLETED`, `READY_TO_HARVEST`, or `HARVESTED`.
+For pending/incomplete sessions it prints compact status/action instead. For
+sessions run with `--artifacts`, any provided `ask-pro-response.zip` is
+extracted under the session's `pro-output/` directory and described in
+`PRO_OUTPUT_MANIFEST.json`. Inline-default sessions should not expect a zip.
 
 `COMPLETED` means harvest now; the run browser may already be closed. If the
 state is `INCOMPLETE_ANSWER` / `preamble_without_artifacts`, do not treat

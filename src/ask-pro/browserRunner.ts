@@ -17,6 +17,8 @@ import {
   appendAskProLog,
   getAskProSessionPaths,
   readAskProPrompt,
+  readAskProStatus,
+  updateAskProResumeCommand,
   updateAskProStatus,
   writeAskProAnswer,
   writeAskProBrowserMetadata,
@@ -52,6 +54,8 @@ export async function runAskProBrowserSession({
 }: RunAskProBrowserSessionOptions): Promise<BrowserRunResult> {
   const paths = getAskProSessionPaths(cwd, sessionId);
   const prompt = await readAskProPrompt({ cwd, sessionId });
+  const { status: sessionStatus } = await readAskProStatus({ cwd, sessionId });
+  const artifactsRequested = sessionStatus.artifacts === true;
   const agentId = agentIdOverride !== undefined ? agentIdOverride : resolveAskProAgentId();
   const browserProfile = browserProfileDir ?? askProBrowserProfileDirForAgentId(agentId);
   const metadata = await readBrowserMetadata(paths.browser).catch(() => null);
@@ -131,13 +135,14 @@ export async function runAskProBrowserSession({
         });
       },
       afterAnswerCb: async ({ Runtime, Page, Input, answer }) => {
-        const manifest = await harvestLatestAssistantZip({
+        await writePostAnswerResponseZipManifest({
+          sessionDir: paths.dir,
+          artifactsRequested,
           runtime: Runtime,
           page: Page,
           input: Input,
-          sessionDir: paths.dir,
+          logger,
         });
-        await writeResponseZipManifest(paths.dir, manifest);
         const finalStatus = await classifyFinalAnswer(paths.dir, answer.markdown || answer.text);
         if (finalStatus.status === "INCOMPLETE_ANSWER") {
           logger("Keeping browser open for incomplete-answer debugging.");
@@ -149,7 +154,7 @@ export async function runAskProBrowserSession({
 
     const answer = result.answerMarkdown || result.answerText;
     await writeAskProAnswer({ cwd, sessionId, answer });
-    await ensureResponseZipManifest(paths.dir);
+    await ensureResponseZipManifest(paths.dir, artifactsRequested);
     const finalStatus = await classifyFinalAnswer(paths.dir, answer);
     await writeAskProBrowserMetadata({
       cwd,
@@ -188,6 +193,41 @@ export async function runAskProBrowserSession({
         "Temporary Chat did not expose the Pro model; retrying in normal ChatGPT.",
       );
       await closeFallbackTemporaryTab(cwd, sessionId, logger);
+      await updateAskProStatus({
+        cwd,
+        sessionId,
+        status: "WAITING",
+        reason: "temporary_unavailable_fell_back_to_normal_chat",
+        temporary: false,
+      });
+      await updateAskProResumeCommand({
+        cwd,
+        sessionId,
+        resumeCommand: withNoTemporaryResumeCommand(sessionStatus.resumeCommand),
+        harvestCommand: sessionStatus.harvestCommand,
+        thinkingTime: sessionStatus.thinkingTime,
+        temporary: false,
+      });
+      const currentMetadata: AskProBrowserMetadata = await readBrowserMetadata(paths.browser).catch(
+        () => ({}),
+      );
+      const { runtime: _closedTemporaryRuntime, ...metadataWithoutRuntime } = currentMetadata;
+      await writeAskProBrowserMetadata({
+        cwd,
+        sessionId,
+        metadata: {
+          ...metadataWithoutRuntime,
+          schemaVersion: 1,
+          status: "running",
+          agentId,
+          profileDir: browserProfile,
+          thinkingTime: requestedThinkingTime,
+          temporary: false,
+          url: ASK_PRO_CHATGPT_URL,
+          acceptLanguage: ASK_PRO_ACCEPT_LANGUAGE,
+          chromeMode: "launched",
+        },
+      });
       return runAskProBrowserSession({
         cwd,
         sessionId,
@@ -259,6 +299,8 @@ export async function resumeAskProBrowserSession({
 }: RunAskProBrowserSessionOptions): Promise<void> {
   const paths = getAskProSessionPaths(cwd, sessionId);
   const prompt = await readAskProPrompt({ cwd, sessionId });
+  const { status: sessionStatus } = await readAskProStatus({ cwd, sessionId });
+  const artifactsRequested = sessionStatus.artifacts === true;
   const logger = buildAskProBrowserLogger(cwd, sessionId, verbose);
   const metadata = await readBrowserMetadata(paths.browser);
   const effectiveTemporary = temporary ?? metadata.temporary;
@@ -366,11 +408,27 @@ export async function resumeAskProBrowserSession({
             },
           });
         },
+        afterAnswerCb: async ({ Runtime, Page, Input, answer }) => {
+          await writePostAnswerResponseZipManifest({
+            sessionDir: paths.dir,
+            artifactsRequested,
+            runtime: Runtime,
+            page: Page,
+            input: Input,
+            logger,
+          });
+          const finalStatus = await classifyFinalAnswer(paths.dir, answer.markdown || answer.text);
+          if (finalStatus.status === "INCOMPLETE_ANSWER") {
+            logger("Keeping browser open for incomplete-answer debugging.");
+            return { keepBrowserOpen: true };
+          }
+          return undefined;
+        },
       },
     );
     const answer = result.answerMarkdown || result.answerText;
     await writeAskProAnswer({ cwd, sessionId, answer });
-    await ensureResponseZipManifest(paths.dir);
+    await ensureResponseZipManifest(paths.dir, artifactsRequested);
     const finalStatus = await classifyFinalAnswer(paths.dir, answer);
     await writeAskProBrowserMetadata({
       cwd,
@@ -453,6 +511,14 @@ function isTemporaryAskProUrl(url: string): boolean {
   }
 }
 
+function withNoTemporaryResumeCommand(command: string): string {
+  const withoutStrictTemporary = command.replace(/\s--temporary(?=\s|$)/g, "");
+  if (/\s--no-temporary(?=\s|$)/.test(withoutStrictTemporary)) {
+    return withoutStrictTemporary;
+  }
+  return withoutStrictTemporary.replace(/\s--resume(?=\s|$)/, " --no-temporary --resume");
+}
+
 async function closeFallbackTemporaryTab(
   cwd: string,
   sessionId: string,
@@ -499,22 +565,96 @@ function isTemporaryProUnavailableError(error: unknown): boolean {
   );
 }
 
-async function ensureResponseZipManifest(sessionDir: string): Promise<void> {
+async function ensureResponseZipManifest(
+  sessionDir: string,
+  artifactsRequested = true,
+): Promise<void> {
   try {
     await fs.access(path.join(sessionDir, "PRO_OUTPUT_MANIFEST.json"));
   } catch {
-    await writeResponseZipManifest(sessionDir, {
-      schemaVersion: 1,
-      responseZip: {
-        status: "unavailable",
-        actualFileName: null,
-        downloadPath: null,
-        extractPath: null,
-        requiredFilesPresent: false,
-        notes: ["Generated zip was unavailable; harvested markdown answer to ANSWER.md."],
-      },
-    });
+    await writeResponseZipManifest(
+      sessionDir,
+      artifactsRequested ? responseZipUnavailableManifest() : responseZipNotRequestedManifest(),
+    );
   }
+}
+
+async function writePostAnswerResponseZipManifest({
+  sessionDir,
+  artifactsRequested,
+  runtime,
+  page,
+  input,
+  logger,
+}: {
+  sessionDir: string;
+  artifactsRequested: boolean;
+  runtime: Parameters<typeof harvestLatestAssistantZip>[0]["runtime"];
+  page: Parameters<typeof harvestLatestAssistantZip>[0]["page"];
+  input: Parameters<typeof harvestLatestAssistantZip>[0]["input"];
+  logger: BrowserLogger;
+}): Promise<void> {
+  try {
+    if (artifactsRequested) {
+      const manifest = await harvestLatestAssistantZip({
+        runtime,
+        page,
+        input,
+        sessionDir,
+      });
+      await writeResponseZipManifest(sessionDir, manifest);
+    } else {
+      await writeResponseZipManifest(sessionDir, responseZipNotRequestedManifest());
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger(`Response zip post-processing failed after answer capture: ${message}`);
+    await writeResponseZipManifest(sessionDir, responseZipErrorManifest(message)).catch(
+      () => undefined,
+    );
+  }
+}
+
+function responseZipNotRequestedManifest() {
+  return {
+    schemaVersion: 1 as const,
+    responseZip: {
+      status: "not_requested" as const,
+      actualFileName: null,
+      downloadPath: null,
+      extractPath: null,
+      requiredFilesPresent: false,
+      notes: ["Response zip harvesting was not requested for this inline-answer session."],
+    },
+  };
+}
+
+function responseZipErrorManifest(message: string) {
+  return {
+    schemaVersion: 1 as const,
+    responseZip: {
+      status: "error" as const,
+      actualFileName: null,
+      downloadPath: null,
+      extractPath: null,
+      requiredFilesPresent: false,
+      notes: [`Response zip post-processing failed after answer capture: ${message}`],
+    },
+  };
+}
+
+function responseZipUnavailableManifest() {
+  return {
+    schemaVersion: 1 as const,
+    responseZip: {
+      status: "unavailable" as const,
+      actualFileName: null,
+      downloadPath: null,
+      extractPath: null,
+      requiredFilesPresent: false,
+      notes: ["Generated zip was unavailable; harvested markdown answer to ANSWER.md."],
+    },
+  };
 }
 
 async function classifyFinalAnswer(
@@ -546,7 +686,7 @@ async function hasCompleteResponseZip(sessionDir: string): Promise<boolean> {
   }
 }
 
-function isSuspiciousPreambleAnswer(answer: string): boolean {
+export function isSuspiciousPreambleAnswer(answer: string): boolean {
   const normalized = answer.trim().toLowerCase().replace(/\s+/g, " ");
   if (!normalized || normalized.length > 1000) return false;
   if (hasSubstantiveAnswerMarker(normalized)) return false;

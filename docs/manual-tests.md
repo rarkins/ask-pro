@@ -105,7 +105,7 @@ Use this when touching `src/ask-pro/responseZip.ts` or the post-answer browser
 hook.
 
 ```bash
-pnpm start -- --verbose --files README.md "Return a short answer. If you can create a zip, include a zip named ask-pro-response.zip containing IMPLEMENTATION_PLAN.md, TASKS.json, TEST_PLAN.md, RISK_REGISTER.md, FILES_TO_EDIT.md, and REPO_CONTEXT_USED.md."
+pnpm start -- --verbose --artifacts --files README.md "Return a short implementation package."
 ```
 
 Expected:
@@ -118,6 +118,9 @@ Expected:
 - If ChatGPT does not expose a zip link, the session still completes with
   `responseZip.status = "unavailable"`.
 - Generated zip contents are not executed.
+
+For an inline advisory run without `--artifacts`, `PRO_OUTPUT_MANIFEST.json`
+should report `responseZip.status = "not_requested"`.
 
 ## Recent Smoke Runs
 

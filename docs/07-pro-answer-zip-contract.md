@@ -87,7 +87,9 @@ After the final answer is visible:
 6. Extract to `.ask-pro/sessions/<id>/pro-output/`.
 7. Validate required files.
 8. If validation fails, keep the zip but mark `responseZip.status = invalid`.
-9. If no zip exists, set `responseZip.status = unavailable` and rely on `ANSWER.md`.
+9. If artifacts were requested but no zip exists, set
+   `responseZip.status = unavailable` and rely on `ANSWER.md`.
+10. If artifacts were not requested, set `responseZip.status = not_requested`.
 
 ## Session metadata
 
@@ -96,7 +98,7 @@ Write:
 ```json
 {
   "responseZip": {
-    "status": "downloaded|unavailable|invalid|error",
+    "status": "downloaded|unavailable|invalid|error|not_requested",
     "actualFileName": "ask-pro-response.zip",
     "downloadPath": ".ask-pro/sessions/<id>/downloads/ask-pro-response.zip",
     "extractPath": ".ask-pro/sessions/<id>/pro-output",
@@ -109,6 +111,7 @@ Write:
 ## Fallback behavior
 
 Never fail the whole `$ask-pro` run because ChatGPT did not generate a zip.
+For inline-default sessions, `not_requested` is the expected manifest status.
 
 Good fallback message:
 

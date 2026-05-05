@@ -179,6 +179,13 @@ describe("ask-pro cli", () => {
       },
     );
     const sessions = await fs.readdir(path.join(cwd, ".ask-pro", "sessions"));
+    const statusPath = path.join(cwd, ".ask-pro", "sessions", sessions[0]!, "status.json");
+    const status = JSON.parse(await fs.readFile(statusPath, "utf8"));
+    await fs.writeFile(
+      statusPath,
+      `${JSON.stringify({ ...status, status: "COMPLETED" }, null, 2)}\n`,
+      "utf8",
+    );
     await fs.writeFile(
       path.join(cwd, ".ask-pro", "sessions", sessions[0]!, "ANSWER.md"),
       "line one\n\n  ",
@@ -193,6 +200,198 @@ describe("ask-pro cli", () => {
 
     expect(stderr).toBe("");
     expect(stdout).toBe("line one\n\n  ");
+  }, 30000);
+
+  test("does not harvest non-answer-bearing sessions", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-cli-harvest-pending-"));
+    tempDirs.push(cwd);
+
+    const cli = path.join(process.cwd(), "bin", "ask-pro-cli.ts");
+    const tsxLoader = pathToFileURL(
+      path.join(process.cwd(), "node_modules", "tsx", "dist", "esm", "index.mjs"),
+    ).href;
+    await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cli, "--dry-run", "Review this."],
+      {
+        cwd,
+      },
+    );
+
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cli, "--harvest"],
+      { cwd },
+    );
+
+    expect(stderr).toBe("");
+    expect(stdout).toContain("  state: dry_run_complete\n");
+    expect(stdout).toContain("  action: resume\n");
+    expect(stdout).not.toContain("placeholder");
+  }, 30000);
+
+  test("harvest recovers captured answers when status bookkeeping is stale", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-cli-harvest-stale-"));
+    tempDirs.push(cwd);
+
+    const cli = path.join(process.cwd(), "bin", "ask-pro-cli.ts");
+    const tsxLoader = pathToFileURL(
+      path.join(process.cwd(), "node_modules", "tsx", "dist", "esm", "index.mjs"),
+    ).href;
+    await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cli, "--dry-run", "Review this."],
+      {
+        cwd,
+      },
+    );
+
+    const sessions = await fs.readdir(path.join(cwd, ".ask-pro", "sessions"));
+    const sessionDir = path.join(cwd, ".ask-pro", "sessions", sessions[0]!);
+    const statusPath = path.join(sessionDir, "status.json");
+    const status = JSON.parse(await fs.readFile(statusPath, "utf8"));
+    await fs.writeFile(
+      statusPath,
+      `${JSON.stringify({ ...status, status: "WAITING" }, null, 2)}\n`,
+      "utf8",
+    );
+    await fs.writeFile(path.join(sessionDir, "ANSWER.md"), "Recovered answer\n", "utf8");
+
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cli, "--harvest"],
+      { cwd },
+    );
+
+    expect(stderr).toBe("");
+    expect(stdout).toBe("Recovered answer\n");
+    const updated = JSON.parse(await fs.readFile(statusPath, "utf8"));
+    expect(updated.status).toBe("HARVESTED");
+  }, 30000);
+
+  test("harvest stale-answer recovery only suppresses exact placeholders", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-cli-harvest-placeholder-text-"));
+    tempDirs.push(cwd);
+
+    const cli = path.join(process.cwd(), "bin", "ask-pro-cli.ts");
+    const tsxLoader = pathToFileURL(
+      path.join(process.cwd(), "node_modules", "tsx", "dist", "esm", "index.mjs"),
+    ).href;
+    await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cli, "--dry-run", "Review this."],
+      { cwd },
+    );
+
+    const sessions = await fs.readdir(path.join(cwd, ".ask-pro", "sessions"));
+    const sessionDir = path.join(cwd, ".ask-pro", "sessions", sessions[0]!);
+    const statusPath = path.join(sessionDir, "status.json");
+    const status = JSON.parse(await fs.readFile(statusPath, "utf8"));
+    await fs.writeFile(
+      statusPath,
+      `${JSON.stringify({ ...status, status: "WAITING" }, null, 2)}\n`,
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(sessionDir, "ANSWER.md"),
+      'Real answer: the phrase "no browser submission was performed" appears in docs only.\n',
+      "utf8",
+    );
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cli, "--harvest"],
+      { cwd },
+    );
+
+    expect(stdout).toBe(
+      'Real answer: the phrase "no browser submission was performed" appears in docs only.\n',
+    );
+  }, 30000);
+
+  test("harvest does not promote incomplete preamble answers", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-cli-harvest-incomplete-"));
+    tempDirs.push(cwd);
+
+    const cli = path.join(process.cwd(), "bin", "ask-pro-cli.ts");
+    const tsxLoader = pathToFileURL(
+      path.join(process.cwd(), "node_modules", "tsx", "dist", "esm", "index.mjs"),
+    ).href;
+    await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cli, "--dry-run", "Review this."],
+      { cwd },
+    );
+
+    const sessions = await fs.readdir(path.join(cwd, ".ask-pro", "sessions"));
+    const sessionDir = path.join(cwd, ".ask-pro", "sessions", sessions[0]!);
+    const statusPath = path.join(sessionDir, "status.json");
+    const status = JSON.parse(await fs.readFile(statusPath, "utf8"));
+    await fs.writeFile(
+      statusPath,
+      `${JSON.stringify(
+        { ...status, status: "INCOMPLETE_ANSWER", reason: "preamble_without_artifacts" },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(sessionDir, "ANSWER.md"),
+      "I'll inspect the bundle and create the files.\n",
+      "utf8",
+    );
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cli, "--harvest"],
+      { cwd },
+    );
+
+    expect(stdout).toContain("  state: incomplete_answer\n");
+    expect(stdout).toContain("  reason: preamble_without_artifacts\n");
+    const updated = JSON.parse(await fs.readFile(statusPath, "utf8"));
+    expect(updated.status).toBe("INCOMPLETE_ANSWER");
+  }, 30000);
+
+  test("harvest does not recover suspicious preambles from stale waiting status", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-cli-harvest-stale-preamble-"));
+    tempDirs.push(cwd);
+
+    const cli = path.join(process.cwd(), "bin", "ask-pro-cli.ts");
+    const tsxLoader = pathToFileURL(
+      path.join(process.cwd(), "node_modules", "tsx", "dist", "esm", "index.mjs"),
+    ).href;
+    await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cli, "--dry-run", "Review this."],
+      { cwd },
+    );
+
+    const sessions = await fs.readdir(path.join(cwd, ".ask-pro", "sessions"));
+    const sessionDir = path.join(cwd, ".ask-pro", "sessions", sessions[0]!);
+    const statusPath = path.join(sessionDir, "status.json");
+    const status = JSON.parse(await fs.readFile(statusPath, "utf8"));
+    await fs.writeFile(
+      statusPath,
+      `${JSON.stringify({ ...status, status: "WAITING" }, null, 2)}\n`,
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(sessionDir, "ANSWER.md"),
+      "I'll inspect the bundle and create the files.\n",
+      "utf8",
+    );
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cli, "--harvest"],
+      { cwd },
+    );
+
+    expect(stdout).toContain("  state: waiting\n");
+    const updated = JSON.parse(await fs.readFile(statusPath, "utf8"));
+    expect(updated.status).toBe("WAITING");
   }, 30000);
 
   test("prints auth-gated status with login action", async () => {
@@ -618,6 +817,14 @@ describe("ask-pro cli", () => {
         cwd,
       },
     );
+    const sessions = await fs.readdir(path.join(cwd, ".ask-pro", "sessions"));
+    const statusPath = path.join(cwd, ".ask-pro", "sessions", sessions[0]!, "status.json");
+    const status = JSON.parse(await fs.readFile(statusPath, "utf8"));
+    await fs.writeFile(
+      statusPath,
+      `${JSON.stringify({ ...status, status: "COMPLETED" }, null, 2)}\n`,
+      "utf8",
+    );
     await execFileAsync(process.execPath, ["--import", tsxLoader, cli, "--harvest"], { cwd });
 
     const { stdout, stderr } = await execFileAsync(
@@ -696,7 +903,7 @@ describe("ask-pro cli", () => {
     const tsxLoader = pathToFileURL(
       path.join(process.cwd(), "node_modules", "tsx", "dist", "esm", "index.mjs"),
     ).href;
-    await execFileAsync(
+    const { stdout } = await execFileAsync(
       process.execPath,
       ["--import", tsxLoader, cli, "--dry-run", "--extended", "--temporary", "Review this."],
       { cwd },
@@ -712,6 +919,8 @@ describe("ask-pro cli", () => {
       temporary: true,
       resumeCommand: expect.stringContaining("--extended --temporary --resume"),
     });
+    expect(stdout).toContain("  thinking: extended\n");
+    expect(stdout).toContain("  temporary: strict\n");
   }, 30000);
 
   test("preserves explicit no-temporary mode in dry-run resume command", async () => {
@@ -722,7 +931,7 @@ describe("ask-pro cli", () => {
     const tsxLoader = pathToFileURL(
       path.join(process.cwd(), "node_modules", "tsx", "dist", "esm", "index.mjs"),
     ).href;
-    await execFileAsync(
+    const { stdout } = await execFileAsync(
       process.execPath,
       ["--import", tsxLoader, cli, "--dry-run", "--no-temporary", "Review this."],
       { cwd },
@@ -737,6 +946,7 @@ describe("ask-pro cli", () => {
       temporary: false,
       resumeCommand: expect.stringContaining("--no-temporary --resume"),
     });
+    expect(stdout).toContain("  temporary: off\n");
   }, 30000);
 
   test("does not infer source checkout launcher from an unrelated npm start script", async () => {

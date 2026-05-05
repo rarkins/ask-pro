@@ -104,7 +104,7 @@ bundles, and recoverability-sensitive work, agents should prefer
 10. submit
 11. wait/heartbeat/status
 12. harvest markdown
-13. download generated zip if available
+13. if `--artifacts` was requested, download generated zip if available
 
 ## Output contract
 
