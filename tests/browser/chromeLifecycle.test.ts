@@ -1,5 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
-import { restoreChromeWindowByPid } from "../../src/browser/chromeLifecycle.js";
+import {
+  buildChromeFlags,
+  restoreChromeWindowByPid,
+  shouldLaunchChromeMinimized,
+} from "../../src/browser/chromeLifecycle.js";
 
 describe("chrome lifecycle window restore", () => {
   test("uses a Windows pid fallback to restore retained Chrome windows", async () => {
@@ -34,5 +38,73 @@ describe("chrome lifecycle window restore", () => {
 
     expect(restored).toBe(false);
     expect(execFileAsync).not.toHaveBeenCalled();
+  });
+});
+
+describe("chrome lifecycle launch window state", () => {
+  test("adds start-minimized for headed Windows managed launches", () => {
+    expect(buildChromeFlags(false, undefined, "en-US,en", { startMinimized: true })).toContain(
+      "--start-minimized",
+    );
+  });
+
+  test("does not add start-minimized for headless launches", () => {
+    expect(buildChromeFlags(true, undefined, "en-US,en", { startMinimized: true })).not.toContain(
+      "--start-minimized",
+    );
+  });
+
+  test("starts minimized only for Windows managed local Chrome", () => {
+    expect(
+      shouldLaunchChromeMinimized(
+        {
+          headless: false,
+          hideWindow: false,
+          startMinimized: true,
+          browserTabRef: null,
+          remoteChrome: null,
+        },
+        "win32",
+      ),
+    ).toBe(true);
+    expect(
+      shouldLaunchChromeMinimized(
+        {
+          headless: false,
+          hideWindow: false,
+          startMinimized: true,
+          browserTabRef: "current",
+          remoteChrome: null,
+        },
+        "win32",
+      ),
+    ).toBe(false);
+    expect(
+      shouldLaunchChromeMinimized(
+        {
+          headless: false,
+          hideWindow: false,
+          startMinimized: true,
+          browserTabRef: null,
+          remoteChrome: null,
+        },
+        "linux",
+      ),
+    ).toBe(false);
+  });
+
+  test("does not start minimized unless the caller has opted in", () => {
+    expect(
+      shouldLaunchChromeMinimized(
+        {
+          headless: false,
+          hideWindow: false,
+          startMinimized: false,
+          browserTabRef: null,
+          remoteChrome: null,
+        },
+        "win32",
+      ),
+    ).toBe(false);
   });
 });

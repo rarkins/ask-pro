@@ -159,11 +159,12 @@ opened browser, then resume:
 ask-pro --resume <session-id>
 ```
 
-On Windows, after login is healthy and the ChatGPT composer is visible,
-authenticated runs may minimize freshly launched managed Chrome so the desktop is
-less distracting. Local managed Chrome also ignores accidental human input while
-Pro is answering. If login, MFA, a browser challenge, or incomplete-answer
-debugging needs human attention, `ask-pro` restores the retained browser.
+On Windows, fresh runs for a managed Chrome profile start minimized after
+`ask-pro` has recorded that profile as auth-ready from a completed run. First
+login, resume/recovery, and stale-auth paths stay visible or are restored for
+human action. Local managed Chrome also ignores accidental human input while Pro
+is answering. If login, MFA, a browser challenge, or incomplete-answer debugging
+needs human attention, `ask-pro` restores the retained browser.
 
 ## Temporary Chat
 

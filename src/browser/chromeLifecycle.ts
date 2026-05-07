@@ -24,6 +24,7 @@ export async function launchChrome(
     config.headless ?? false,
     debugBindAddress,
     config.acceptLanguage,
+    { startMinimized: shouldLaunchChromeMinimized(config) },
   );
   const usePatchedLauncher = Boolean(connectHost && connectHost !== "127.0.0.1");
   const launcher = usePatchedLauncher
@@ -651,6 +652,7 @@ export function buildChromeFlags(
   headless: boolean,
   debugBindAddress?: string | null,
   acceptLanguage = "en-US,en",
+  options: { startMinimized?: boolean } = {},
 ): string[] {
   const primaryLanguage = acceptLanguage.split(",", 1)[0]?.trim() || "en-US";
   const flags = [
@@ -684,9 +686,28 @@ export function buildChromeFlags(
 
   if (headless) {
     flags.push("--headless=new");
+  } else if (options.startMinimized) {
+    flags.push("--start-minimized");
   }
 
   return flags;
+}
+
+export function shouldLaunchChromeMinimized(
+  config: Pick<
+    ResolvedBrowserConfig,
+    "headless" | "hideWindow" | "browserTabRef" | "remoteChrome" | "startMinimized"
+  >,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return (
+    Boolean(config.startMinimized) &&
+    platform === "win32" &&
+    !config.headless &&
+    !config.hideWindow &&
+    !config.browserTabRef &&
+    !config.remoteChrome
+  );
 }
 
 function parseDebugPortEnv(): number | null {

@@ -203,3 +203,87 @@ describe("human intervention detection", () => {
     );
   });
 });
+
+describe("login recovery reveal hook", () => {
+  test("calls auth-needed hook before non-manual login failures escape", async () => {
+    const onAuthNeeded = vi.fn();
+    const error = new Error("ChatGPT session not detected. Login button detected on page.");
+
+    await expect(
+      __test__.waitForLogin({
+        runtime: {} as never,
+        logger: vi.fn<(message: string) => void>(),
+        appliedCookies: 0,
+        manualLogin: false,
+        timeoutMs: 1000,
+        onAuthNeeded,
+        ensureLoggedInFn: vi.fn().mockRejectedValue(error),
+      }),
+    ).rejects.toThrow(error);
+
+    expect(onAuthNeeded).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps original non-manual login failure if auth-needed hook fails", async () => {
+    const logger = vi.fn<(message: string) => void>();
+    const error = new Error("ChatGPT session not detected. Login button detected on page.");
+
+    await expect(
+      __test__.waitForLogin({
+        runtime: {} as never,
+        logger,
+        appliedCookies: 0,
+        manualLogin: false,
+        timeoutMs: 1000,
+        onAuthNeeded: vi.fn().mockRejectedValue(new Error("restore failed")),
+        ensureLoggedInFn: vi.fn().mockRejectedValue(error),
+      }),
+    ).rejects.toThrow(error);
+
+    expect(logger).toHaveBeenCalledWith(
+      "Failed to reveal browser for auth recovery: restore failed",
+    );
+  });
+
+  test("reveals before manual-login auth blockers that are not login-button shaped", async () => {
+    const onAuthNeeded = vi.fn();
+    const error = new Error("Cloudflare challenge detected.");
+
+    await expect(
+      __test__.waitForLogin({
+        runtime: {} as never,
+        logger: vi.fn<(message: string) => void>(),
+        appliedCookies: 0,
+        manualLogin: true,
+        timeoutMs: 1000,
+        onAuthNeeded,
+        ensureLoggedInFn: vi.fn().mockRejectedValue(error),
+      }),
+    ).rejects.toThrow(error);
+
+    expect(onAuthNeeded).toHaveBeenCalledTimes(1);
+  });
+
+  test("continues manual-login polling if auth-needed reveal fails", async () => {
+    const logger = vi.fn<(message: string) => void>();
+    const loginMissing = new Error("ChatGPT session not detected. Login button detected on page.");
+    const checkLogin = vi.fn().mockRejectedValueOnce(loginMissing).mockResolvedValueOnce(undefined);
+
+    await expect(
+      __test__.waitForLogin({
+        runtime: {} as never,
+        logger,
+        appliedCookies: 0,
+        manualLogin: true,
+        timeoutMs: 3000,
+        onAuthNeeded: vi.fn().mockRejectedValue(new Error("restore failed")),
+        ensureLoggedInFn: checkLogin,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(checkLogin).toHaveBeenCalledTimes(2);
+    expect(logger).toHaveBeenCalledWith(
+      "Failed to reveal browser for auth recovery: restore failed",
+    );
+  });
+});

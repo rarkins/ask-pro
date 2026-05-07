@@ -21,6 +21,7 @@ import {
   closeRemoteChromeTarget,
   closeChromeGracefully,
   restoreChromeWindowByPid,
+  shouldLaunchChromeMinimized,
 } from "./chromeLifecycle.js";
 import { syncCookies } from "./cookies.js";
 import {
@@ -430,6 +431,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
         logger,
       );
     })());
+  const chromeLaunchMinimized = !reusedChrome && shouldLaunchChromeMinimized(config);
   const chromeHost = (chrome as unknown as { host?: string }).host ?? "127.0.0.1";
   // Persist profile state so future manual-login runs can reuse this Chrome.
   if (manualLogin && chrome.port) {
@@ -536,7 +538,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       ...config,
       reusedChrome: Boolean(reusedChrome),
     });
-    let authenticatedWindowParked = false;
+    let authenticatedWindowParked = chromeLaunchMinimized;
     const parkAuthenticatedWindow = async (reason: string): Promise<void> => {
       if (!shouldParkAuthenticatedWindow || authenticatedWindowParked || !client) return;
       authenticatedWindowParked = await setChromeWindowState(client, "minimized", logger, {
@@ -653,6 +655,9 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
         manualLogin,
         timeoutMs: config.timeoutMs,
         manualLoginWaitMs: config.manualLoginWaitMs,
+        onAuthNeeded: async () => {
+          await revealAuthenticatedWindow("login-required");
+        },
       }),
     );
 
@@ -1566,6 +1571,8 @@ async function waitForLogin({
   manualLogin,
   timeoutMs,
   manualLoginWaitMs,
+  onAuthNeeded,
+  ensureLoggedInFn,
 }: {
   runtime: ChromeClient["Runtime"];
   logger: BrowserLogger;
@@ -1573,23 +1580,46 @@ async function waitForLogin({
   manualLogin: boolean;
   timeoutMs: number;
   manualLoginWaitMs?: number;
+  onAuthNeeded?: () => void | Promise<void>;
+  ensureLoggedInFn?: typeof ensureLoggedIn;
 }): Promise<void> {
+  const checkLogin = ensureLoggedInFn ?? ensureLoggedIn;
+  const notifyAuthNeeded = async (): Promise<void> => {
+    try {
+      await onAuthNeeded?.();
+    } catch (hookError) {
+      logger(
+        `Failed to reveal browser for auth recovery: ${hookError instanceof Error ? hookError.message : String(hookError)}`,
+      );
+    }
+  };
   if (!manualLogin) {
-    await ensureLoggedIn(runtime, logger, { appliedCookies });
+    try {
+      await checkLogin(runtime, logger, { appliedCookies });
+    } catch (error) {
+      await notifyAuthNeeded();
+      throw error;
+    }
     return;
   }
   const deadline = Date.now() + Math.min(manualLoginWaitMs ?? timeoutMs ?? 1_200_000, timeoutMs);
   let lastNotice = 0;
+  let authNeededNotified = false;
   while (Date.now() < deadline) {
     try {
-      await ensureLoggedIn(runtime, logger, { appliedCookies });
+      await checkLogin(runtime, logger, { appliedCookies });
       return;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const loginDetected = message?.toLowerCase().includes("login button");
       const sessionMissing = message?.toLowerCase().includes("session not detected");
       if (!loginDetected && !sessionMissing) {
+        await notifyAuthNeeded();
         throw error;
+      }
+      if (!authNeededNotified) {
+        authNeededNotified = true;
+        await notifyAuthNeeded();
       }
       const now = Date.now();
       if (now - lastNotice > 5000) {
@@ -2430,6 +2460,7 @@ export const __test__ = {
   shouldParkAuthenticatedChromeWindow,
   shouldEnablePostSubmitInputGuard,
   detectHumanInterventionReason,
+  waitForLogin,
 };
 export { syncCookies } from "./cookies.js";
 export {

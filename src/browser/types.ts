@@ -64,6 +64,7 @@ export interface BrowserAutomationConfig {
   headless?: boolean;
   keepBrowser?: boolean;
   hideWindow?: boolean;
+  startMinimized?: boolean;
   desiredModel?: string | null;
   modelStrategy?: BrowserModelStrategy;
   debug?: boolean;
@@ -160,5 +161,6 @@ export type ResolvedBrowserConfig = Required<
   manualLoginProfileDir?: string | null;
   manualLoginCookieSync?: boolean;
   manualLoginWaitMs?: number;
+  startMinimized?: boolean;
   acceptLanguage?: string;
 };

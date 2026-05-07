@@ -116,6 +116,128 @@ describe("ask-pro browser runner", () => {
     });
   });
 
+  test("does not start minimized before a profile has completed an authenticated run", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-run-auth-marker-first-"));
+    tempDirs.push(cwd);
+    const browserProfile = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-profile-first-"));
+    tempDirs.push(browserProfile);
+    const session = await createAskProSession({
+      cwd,
+      question: "Review before marker.",
+      filePatterns: [],
+      dryRun: false,
+    });
+
+    await runAskProBrowserSession({
+      cwd,
+      sessionId: session.id,
+      browserProfileDir: browserProfile,
+    });
+
+    const firstCall = runBrowserModeMock.mock.calls[0] as unknown[] | undefined;
+    expect(firstCall?.[0]).toMatchObject({
+      config: {
+        manualLoginProfileDir: browserProfile,
+        startMinimized: false,
+      },
+    });
+    await expect(
+      fs.stat(path.join(browserProfile, "ask-pro-auth-ready.json")),
+    ).resolves.toBeTruthy();
+  });
+
+  test("starts minimized after a profile has completed an authenticated run", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-run-auth-marker-ready-"));
+    tempDirs.push(cwd);
+    const browserProfile = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-profile-ready-"));
+    tempDirs.push(browserProfile);
+    await fs.writeFile(
+      path.join(browserProfile, "ask-pro-auth-ready.json"),
+      JSON.stringify({ authenticated: true }),
+      "utf8",
+    );
+    const session = await createAskProSession({
+      cwd,
+      question: "Review after marker.",
+      filePatterns: [],
+      dryRun: false,
+    });
+
+    await runAskProBrowserSession({
+      cwd,
+      sessionId: session.id,
+      browserProfileDir: browserProfile,
+    });
+
+    const firstCall = runBrowserModeMock.mock.calls[0] as unknown[] | undefined;
+    expect(firstCall?.[0]).toMatchObject({
+      config: {
+        manualLoginProfileDir: browserProfile,
+        startMinimized: true,
+      },
+    });
+  });
+
+  test("does not mark a profile auth-ready for incomplete answers", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-run-auth-marker-incomplete-"));
+    tempDirs.push(cwd);
+    const browserProfile = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-profile-incomplete-"));
+    tempDirs.push(browserProfile);
+    const session = await createAskProSession({
+      cwd,
+      question: "Give the actual answer.",
+      filePatterns: [],
+      dryRun: false,
+    });
+    runBrowserModeMock.mockResolvedValueOnce({
+      answerText: "I'll inspect the bundle and create the files.",
+      answerMarkdown: "I'll inspect the bundle and create the files.",
+      browserTransport: "launched",
+    });
+
+    await runAskProBrowserSession({
+      cwd,
+      sessionId: session.id,
+      browserProfileDir: browserProfile,
+    });
+
+    await expect(fs.stat(path.join(browserProfile, "ask-pro-auth-ready.json"))).rejects.toThrow();
+  });
+
+  test("does not fail completed sessions when auth-ready marker persistence fails", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-run-auth-marker-write-fail-"));
+    tempDirs.push(cwd);
+    const browserProfile = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-profile-write-fail-"));
+    tempDirs.push(browserProfile);
+    const session = await createAskProSession({
+      cwd,
+      question: "Review after marker write failure.",
+      filePatterns: [],
+      dryRun: false,
+    });
+    const originalWriteFile = fs.writeFile.bind(fs);
+    const writeFileSpy = vi.spyOn(fs, "writeFile").mockImplementation(async (...args) => {
+      const target = String(args[0]);
+      if (target.endsWith("ask-pro-auth-ready.json")) {
+        throw new Error("marker write failed");
+      }
+      return originalWriteFile(...args);
+    });
+
+    try {
+      await runAskProBrowserSession({
+        cwd,
+        sessionId: session.id,
+        browserProfileDir: browserProfile,
+      });
+    } finally {
+      writeFileSpy.mockRestore();
+    }
+
+    const { status } = await readAskProStatus({ cwd, sessionId: session.id });
+    expect(status.status).toBe("COMPLETED");
+  });
+
   test("runs ask-pro sessions with extended thinking when requested", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-run-extended-"));
     tempDirs.push(cwd);
@@ -841,6 +963,47 @@ describe("ask-pro browser runner", () => {
     expect(manifest.responseZip.status).toBe("not_requested");
   });
 
+  test("reattach relaunch stays visible even for auth-ready profiles", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-auth-marker-"));
+    tempDirs.push(cwd);
+    const profileDir = path.join(cwd, "profile");
+    await fs.mkdir(profileDir, { recursive: true });
+    await fs.writeFile(
+      path.join(profileDir, "ask-pro-auth-ready.json"),
+      JSON.stringify({ authenticated: true }),
+      "utf8",
+    );
+    const session = await createAskProSession({
+      cwd,
+      question: "Review the saved browser session with an auth-ready profile.",
+      filePatterns: [],
+      dryRun: false,
+    });
+    await writeAskProBrowserMetadata({
+      cwd,
+      sessionId: session.id,
+      metadata: {
+        schemaVersion: 1,
+        status: "running",
+        profileDir,
+        runtime: {
+          chromePort: 9222,
+          chromeHost: "127.0.0.1",
+          tabUrl: "https://chatgpt.com/c/test",
+        },
+      },
+    });
+    await updateAskProStatus({ cwd, sessionId: session.id, status: "WAIT_TIMED_OUT" });
+
+    await resumeAskProBrowserSession({ cwd, sessionId: session.id });
+
+    const firstCall = resumeBrowserSessionMock.mock.calls[0] as unknown[] | undefined;
+    expect(firstCall?.[1]).toMatchObject({
+      manualLoginProfileDir: profileDir,
+      startMinimized: false,
+    });
+  });
+
   test("reattach harvests response zip for artifact sessions", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-artifacts-"));
     tempDirs.push(cwd);
@@ -1298,6 +1461,7 @@ describe("ask-pro browser runner", () => {
           "ask-pro",
           "browser-profile",
         ),
+        startMinimized: false,
         thinkingTime: "extended",
         url: "https://chatgpt.com/",
       },

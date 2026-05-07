@@ -30,6 +30,7 @@ const MANUAL_LOGIN_WAIT_MS = 10 * 60 * 1000;
 const ASK_PRO_CHATGPT_URL = "https://chatgpt.com/";
 const ASK_PRO_TEMPORARY_CHATGPT_URL = "https://chatgpt.com/?temporary-chat=true";
 const ASK_PRO_ACCEPT_LANGUAGE = "en-US,en";
+const AUTH_READY_MARKER = "ask-pro-auth-ready.json";
 
 export interface RunAskProBrowserSessionOptions {
   cwd: string;
@@ -39,6 +40,7 @@ export interface RunAskProBrowserSessionOptions {
   chatgptUrl?: string;
   browserProfileDir?: string;
   agentId?: string | null;
+  allowStartMinimized?: boolean;
   verbose?: boolean;
 }
 
@@ -50,6 +52,7 @@ export async function runAskProBrowserSession({
   chatgptUrl: chatgptUrlOverride,
   browserProfileDir,
   agentId: agentIdOverride,
+  allowStartMinimized = true,
   verbose,
 }: RunAskProBrowserSessionOptions): Promise<BrowserRunResult> {
   const paths = getAskProSessionPaths(cwd, sessionId);
@@ -68,6 +71,7 @@ export async function runAskProBrowserSession({
         ? ASK_PRO_CHATGPT_URL
         : (metadata?.url ?? ASK_PRO_TEMPORARY_CHATGPT_URL));
   await fs.mkdir(browserProfile, { recursive: true });
+  const startMinimized = allowStartMinimized && (await hasAuthReadyMarker(browserProfile));
   await writeAskProBrowserMetadata({
     cwd,
     sessionId,
@@ -110,6 +114,7 @@ export async function runAskProBrowserSession({
         modelStrategy: "select",
         thinkingTime: requestedThinkingTime,
         acceptLanguage: ASK_PRO_ACCEPT_LANGUAGE,
+        startMinimized,
         keepBrowser: true,
         allowCookieErrors: true,
       },
@@ -178,6 +183,9 @@ export async function runAskProBrowserSession({
       status: finalStatus.status,
       reason: finalStatus.reason,
     });
+    if (finalStatus.status === "COMPLETED") {
+      await recordAuthReadyMarker(browserProfile, logger);
+    }
     return result;
   } catch (error) {
     if (
@@ -326,6 +334,7 @@ export async function resumeAskProBrowserSession({
       chatgptUrl: ASK_PRO_CHATGPT_URL,
       browserProfileDir: fallbackProfile,
       agentId: metadata.agentId ?? null,
+      allowStartMinimized: false,
       verbose,
     });
     return;
@@ -351,6 +360,7 @@ export async function resumeAskProBrowserSession({
       chatgptUrl: shouldPreserveUrl ? chatgptUrl : undefined,
       browserProfileDir: fallbackProfile,
       agentId: metadata.agentId ?? null,
+      allowStartMinimized: false,
       verbose,
     });
     return;
@@ -385,6 +395,7 @@ export async function resumeAskProBrowserSession({
         acceptLanguage: ASK_PRO_ACCEPT_LANGUAGE,
         url: chatgptUrl,
         thinkingTime: thinkingTime ?? metadata.thinkingTime,
+        startMinimized: false,
       },
       logger,
       {
@@ -452,6 +463,9 @@ export async function resumeAskProBrowserSession({
       status: finalStatus.status,
       reason: finalStatus.reason,
     });
+    if (finalStatus.status === "COMPLETED") {
+      await recordAuthReadyMarker(fallbackProfile, logger);
+    }
   } catch (error) {
     if (isAuthGateError(error)) {
       const currentMetadata = await readBrowserMetadata(paths.browser).catch(() => metadata);
@@ -703,6 +717,34 @@ function hasSubstantiveAnswerMarker(answer: string): boolean {
   return /\b(recommendation|recommend|answer|verdict|use|fix|root cause|because|risk|should|shouldn['’]?t|must|do not|don['’]?t)\b/.test(
     answer,
   );
+}
+
+async function hasAuthReadyMarker(profileDir: string): Promise<boolean> {
+  try {
+    const raw = await fs.readFile(path.join(profileDir, AUTH_READY_MARKER), "utf8");
+    const marker = JSON.parse(raw) as { authenticated?: boolean };
+    return marker.authenticated === true;
+  } catch {
+    return false;
+  }
+}
+
+async function writeAuthReadyMarker(profileDir: string): Promise<void> {
+  await fs.mkdir(profileDir, { recursive: true });
+  await fs.writeFile(
+    path.join(profileDir, AUTH_READY_MARKER),
+    `${JSON.stringify({ authenticated: true, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+async function recordAuthReadyMarker(profileDir: string, logger: BrowserLogger): Promise<void> {
+  try {
+    await writeAuthReadyMarker(profileDir);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger(`Failed to record auth-ready profile marker: ${message}`);
+  }
 }
 
 function authFailureChromeMode(chromeMode: AskProBrowserMetadata["chromeMode"]) {
