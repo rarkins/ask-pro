@@ -95,6 +95,12 @@ ask-pro --harvest <session-id>
 - Prefer `--prompt-file` for multiline prompts.
 - If `ask-pro` is not on `PATH`, use the cached plugin runner instead of a
   mutable source checkout.
+- Treat ChatGPT Pro as a cold oracle: it does not know the repo, user, prior
+  decisions, or Codex thread context unless you include that in the prompt or
+  attached files.
+- Provide more background than feels strictly necessary: product goal, current
+  state, constraints, files attached, options considered, and the exact output
+  you need.
 - Prefer `--no-temporary` for repo advisories, review rounds, large bundles, or
   anything where recovery matters.
 - Keep bundles focused: relevant source, focused tests, docs that define the

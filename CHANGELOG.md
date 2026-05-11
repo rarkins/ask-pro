@@ -40,6 +40,8 @@
   so `codex plugin marketplace add` exposes the plugin in Codex.
 - Make the cached plugin runner bootstrap Git marketplace installs by installing
   dependencies and building `dist` when the cached source has not been built yet.
+- Clarify that ask-pro prompts must include cold-start context because ChatGPT
+  Pro does not know local repo history, user preferences, or Codex thread state.
 - Recommend `--no-temporary` for repo advisories, review rounds, large bundles,
   and recoverability-sensitive runs.
 - Mark context redaction as best-effort in manifests and docs instead of

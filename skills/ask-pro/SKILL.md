@@ -29,7 +29,12 @@ When invoked:
 1. Inspect the repo and the relevant files.
 2. Identify the exact decision Pro should answer.
 3. Choose a small, high-signal file bundle with `--files`.
-4. Write the prompt yourself; include constraints, what you inspected, the files attached, options considered, and the output you need.
+4. Write the prompt yourself. Treat ChatGPT Pro as a cold oracle: it does not
+   know who the user is, what this repo does, what decisions were made earlier,
+   or any context that is not in your prompt or attached files. Include more
+   background than feels strictly necessary: the product goal, current state,
+   constraints, what you inspected, files attached, options considered, and the
+   exact output you need.
 5. Run the smallest useful command, usually
    `ask-pro --no-temporary --files "<glob>" "<prompt>"` for repo advisories.
    For multiline prompts, write a temporary prompt file and use
@@ -80,6 +85,9 @@ require the human to log in again. Example:
 ## Prompt Shape
 
 Ask Pro to be direct, practical, and biased toward boring reliable choices.
+Assume it starts with zero local memory. Do not rely on Codex thread context,
+repo folklore, prior ask-pro runs, branch names, or unstated user preferences.
+Put the essential context in the prompt even when it feels obvious.
 Keep advisory design consults as plain answer requests. Start advisory prompts
 with:
 
