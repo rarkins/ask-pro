@@ -5,6 +5,7 @@
 ### Changed
 
 - Add the ask-pro logo as the Codex marketplace plugin icon.
+- Remove a developer-specific local marketplace name from public docs.
 - Rename the package and binary surface to `ask_pro` / `ask-pro`.
 - Change normal CLI stdout to compact TOON-style agent telemetry and keep
   browser progress on stderr/session logs.

@@ -103,7 +103,7 @@ Risk: a public automated ChatGPT web tool may be perceived as scraping or abusiv
 
 Mitigation:
 
-- position as local personal-use browser handoff
+- position as a local, human-controlled browser handoff
 - user controls auth
 - no credential sharing
 - no scale/scraping features

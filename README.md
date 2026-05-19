@@ -37,8 +37,8 @@ pnpm run plugin:refresh
 
 `pnpm run plugin:refresh` updates the local Codex plugin cache from the source
 checkout. By default it refreshes the installed Git marketplace cache under
-`~/.codex/plugins/cache/ask-pro/ask-pro/<version>`, so you do not need a second
-`jonat-local` install for development. Do not edit
+`~/.codex/plugins/cache/ask-pro/ask-pro/<version>`, so no separate local
+marketplace install is needed for development. Do not edit
 `~/.codex/plugins/cache/...` by hand.
 
 Git marketplace installs cache the source checkout. If `ask-pro` is not on
