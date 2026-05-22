@@ -4,7 +4,11 @@
 
 ### Changed
 
-- Add the ask-pro logo as the Codex marketplace plugin icon.
+- Add the ask-pro logo as the Codex marketplace plugin icon and keep its
+  manifest path validator-clean.
+- Refresh root-level plugin assets into the local Codex plugin cache.
+- Require the Codex plugin validator in the local signoff loop before
+  plugin-facing commits.
 - Remove a developer-specific local marketplace name from public docs.
 - Rename the package and binary surface to `ask_pro` / `ask-pro`.
 - Change normal CLI stdout to compact TOON-style agent telemetry and keep

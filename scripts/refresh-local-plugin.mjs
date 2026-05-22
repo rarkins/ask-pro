@@ -77,6 +77,7 @@ await fs.mkdir(targetRoot, { recursive: true });
 
 for (const item of [
   ".codex-plugin",
+  "assets",
   "skills",
   "references",
   "README.md",

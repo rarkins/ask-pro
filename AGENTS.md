@@ -27,12 +27,16 @@ ask_pro-specific notes:
 - Before release, run the fast local loop:
 
   ```bash
+  python C:/Users/jonat/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py .
   pnpm run build
   pnpm run lint
   pnpm test
   pnpm run format:check
   pnpm pack --dry-run
   ```
+
+- Run the plugin validator successfully before committing any plugin-facing
+  change.
 
 - Live browser smokes are opt-in; see `docs/manual-tests.md`.
 - Working on Windows? Read and update `docs/windows-work.md`.
