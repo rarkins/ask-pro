@@ -22,6 +22,15 @@ Use this skill when the user explicitly asks for `$ask-pro`, or when a second op
 
 Do not use it for trivial syntax fixes, formatting, obvious dependency updates, or small bugs with a clear cause.
 
+## Critical Reminders
+
+- Remember: ask-pro has ZERO context. It knows NOTHING. So your prompt and
+  context file need to include absolutely everything that's relevant. It does
+  not magically know anything you know.
+- Long waits are normal. ask-pro can take a super long time to run; do not
+  close or kill the browser window/run until at least 3 hours have passed unless
+  the CLI has completed, failed, or explicitly asks for human action.
+
 ## Workflow
 
 When invoked:
