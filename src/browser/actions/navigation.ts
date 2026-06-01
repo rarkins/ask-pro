@@ -230,6 +230,7 @@ export async function ensureLoggedIn(
       probe.onAuthPage,
     )}, url=${probe.pageUrl ?? "n/a"}, error=${probe.error ?? "none"})`,
   );
+  await openLoginSurface(Runtime, logger);
 
   const domLabel = probe.domLoginCta ? " Login button detected on page." : "";
   const cookieHint = options.remoteSession
@@ -239,6 +240,60 @@ export async function ensureLoggedIn(
       : "ChatGPT login appears missing; sign in to ChatGPT in the opened browser, then resume.";
 
   throw new Error(`ChatGPT session not detected.${domLabel} ${cookieHint}`);
+}
+
+async function openLoginSurface(
+  Runtime: ChromeClient["Runtime"],
+  logger: BrowserLogger,
+): Promise<void> {
+  const outcome = await Runtime.evaluate({
+    expression: `(() => {
+      const isVisible = (node) => {
+        if (!(node instanceof HTMLElement)) return false;
+        if (node.closest('[hidden],[aria-hidden="true"],[inert]')) return false;
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && !node.hasAttribute('disabled');
+      };
+      const labelFor = (node) =>
+        String(node?.textContent || node?.getAttribute?.('aria-label') || node?.getAttribute?.('title') || '')
+          .toLowerCase()
+          .replace(/\\s+/g, ' ')
+          .trim();
+      const pageText = String(document.body?.textContent || '').toLowerCase();
+      const hasExpiredSessionDialog = pageText.includes('session has expired');
+      if (!hasExpiredSessionDialog) {
+        return { opened: false, method: 'no-expired-session-dialog' };
+      }
+      const login = Array.from(document.querySelectorAll('a,button,[role="button"]')).find((node) => {
+        if (!isVisible(node)) return false;
+        const label = labelFor(node);
+        return label === 'log in' || label === 'login';
+      });
+      if (login) {
+        login.click();
+        return { opened: true, method: 'click', label: labelFor(login) };
+      }
+      return { opened: false, method: 'missing-control' };
+    })()`,
+    returnByValue: true,
+  }).catch((error: unknown) => {
+    logger(
+      `Failed to open ChatGPT login surface: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  });
+  const result = outcome?.result?.value as
+    | { opened?: boolean; method?: string; label?: string }
+    | undefined;
+  if (result?.opened) {
+    logger(
+      `Opened ChatGPT login surface (${result.method ?? "unknown"}${result.label ? `: ${result.label}` : ""}).`,
+    );
+  } else if (result?.method) {
+    logger(`ChatGPT login control not found (${result.method}).`);
+  }
 }
 
 async function attemptWelcomeBackLogin(

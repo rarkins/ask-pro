@@ -19,6 +19,10 @@
   profile mode/path, Chrome mode, and language steering.
 - Surface recoverable non-temporary ChatGPT `conversation_url` in agent
   telemetry when known.
+- Keep stale-auth manual-login browser runs open for human sign-in, including
+  auth failures reported without a visible login-button signal.
+- Open ChatGPT's expired-session login dialog automatically and wait for the
+  human-controlled sign-in to restore the shared profile.
 - Add `--prompt-file` for multiline prompts and stdin handoffs without fragile
   shell quoting.
 - Add `--artifacts` / `--response-zip` as the explicit response bundle opt-in.

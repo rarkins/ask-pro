@@ -2,6 +2,7 @@ import { mkdtemp, rm, mkdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import net from "node:net";
+import CDP from "chrome-remote-interface";
 import { resolveBrowserConfig } from "./config.js";
 import type {
   BrowserRunOptions,
@@ -349,6 +350,9 @@ function startHumanInterventionRestoreMonitor({
     restoring = true;
     logger(`[browser] ${reason} detected while waiting; restoring Chrome for human action.`);
     await disableInputGuard().catch(() => false);
+    if (reason === "login") {
+      await openLoginSurfaceForHumanAction(Runtime, logger).catch(() => undefined);
+    }
     await revealWindow(`human-intervention:${reason}`).catch(() => undefined);
     rejectPromise(
       new BrowserAutomationError(
@@ -369,6 +373,55 @@ function startHumanInterventionRestoreMonitor({
       clearInterval(timer);
     },
   };
+}
+
+async function openLoginSurfaceForHumanAction(
+  Runtime: ChromeClient["Runtime"],
+  logger: BrowserLogger,
+): Promise<void> {
+  const outcome = await Runtime.evaluate({
+    expression: `(() => {
+      const isVisible = (node) => {
+        if (!(node instanceof HTMLElement)) return false;
+        if (node.closest('[hidden],[aria-hidden="true"],[inert]')) return false;
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && !node.hasAttribute('disabled');
+      };
+      const labelFor = (node) =>
+        String(node?.textContent || node?.getAttribute?.('aria-label') || node?.getAttribute?.('title') || '')
+          .toLowerCase()
+          .replace(/\\s+/g, ' ')
+          .trim();
+      const pageText = String(document.body?.textContent || '').toLowerCase();
+      const hasExpiredSessionDialog = pageText.includes('session has expired');
+      if (!hasExpiredSessionDialog) {
+        return { opened: false, method: 'no-expired-session-dialog' };
+      }
+      const login = Array.from(document.querySelectorAll('a,button,[role="button"]')).find((node) => {
+        if (!isVisible(node)) return false;
+        const label = labelFor(node);
+        return label === 'log in' || label === 'login';
+      });
+      if (login) {
+        login.click();
+        return { opened: true, method: 'click', label: labelFor(login) };
+      }
+      return { opened: false, method: 'missing-control' };
+    })()`,
+    returnByValue: true,
+  });
+  const result = outcome.result?.value as
+    | { opened?: boolean; method?: string; label?: string }
+    | undefined;
+  if (result?.opened) {
+    logger(
+      `[browser] Opened ChatGPT login surface for human action (${result.method ?? "unknown"}${result.label ? `: ${result.label}` : ""}).`,
+    );
+  } else if (result?.method) {
+    logger(`[browser] ChatGPT login control not found (${result.method}).`);
+  }
 }
 
 export async function runBrowserMode(options: BrowserRunOptions): Promise<BrowserRunResult> {
@@ -1462,6 +1515,11 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     if (shouldPreserveBrowserOnError(normalizedError, config.headless)) {
       preserveBrowserOnError = true;
       await revealAuthenticatedWindow("manual-recovery");
+      const stage =
+        normalizedError instanceof BrowserAutomationError
+          ? String(normalizedError.details?.stage ?? "")
+          : "";
+      const isLoginRequired = stage === "login-required";
       const runtime = {
         chromePid: chrome.pid,
         chromePort: chrome.port,
@@ -1473,12 +1531,40 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       };
       const reuseProfileHint = `ask-pro --resume <session-id> # browser profile: ${JSON.stringify(userDataDir)}`;
       await emitRuntimeHint();
-      logger("Cloudflare challenge detected; leaving browser open so you can complete the check.");
+      logger(
+        isLoginRequired
+          ? "ChatGPT login required; leaving browser open so you can sign in."
+          : "Cloudflare challenge detected; leaving browser open so you can complete the check.",
+      );
       logger(`Reuse this browser profile with: ${reuseProfileHint}`);
+      if (isLoginRequired && manualLogin) {
+        const recoveryRuntime = client?.Runtime;
+        if (!recoveryRuntime) {
+          throw normalizedError;
+        }
+        logger(
+          "Manual login mode: waiting for sign-in to complete, then restarting the ask-pro submission...",
+        );
+        await openLoginSurfaceForHumanAction(recoveryRuntime, logger).catch(() => undefined);
+        await revealAuthenticatedWindow("login-required");
+        await waitForManualLoginOnLiveChrome({
+          host: chromeHost,
+          port: chrome.port,
+          logger,
+          timeoutMs: Math.min(config.manualLoginWaitMs ?? config.timeoutMs, config.timeoutMs),
+        });
+        logger("Manual login completed; restarting ask-pro submission.");
+        preserveBrowserOnError = false;
+        await client?.close().catch(() => undefined);
+        await closeChromeGracefully(chrome, logger).catch(() => undefined);
+        return runBrowserMode(options);
+      }
       throw new BrowserAutomationError(
-        "Cloudflare challenge detected. Complete the “Just a moment…” check in the open browser, then rerun.",
+        isLoginRequired
+          ? "ChatGPT login required. Sign in in the open browser, then rerun."
+          : "Cloudflare challenge detected. Complete the “Just a moment…” check in the open browser, then rerun.",
         {
-          stage: "cloudflare-challenge",
+          stage: isLoginRequired ? "login-required" : "cloudflare-challenge",
           runtime,
           reuseProfileHint,
         },
@@ -1715,9 +1801,7 @@ async function waitForLogin({
       return;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const loginDetected = message?.toLowerCase().includes("login button");
-      const sessionMissing = message?.toLowerCase().includes("session not detected");
-      if (!loginDetected && !sessionMissing) {
+      if (!isRecoverableManualLoginMessage(message)) {
         await notifyAuthNeeded();
         throw error;
       }
@@ -1735,9 +1819,135 @@ async function waitForLogin({
       await delay(1000);
     }
   }
-  throw new Error(
-    "Manual login mode timed out waiting for ChatGPT session; please sign in and retry.",
+  await notifyAuthNeeded();
+  throw new BrowserAutomationError(
+    "Manual login mode timed out waiting for ChatGPT session; sign in in the open browser, then resume.",
+    { stage: "login-required" },
   );
+}
+
+function isRecoverableManualLoginMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("session not detected") ||
+    normalized.includes("login button") ||
+    normalized.includes("login appears missing") ||
+    normalized.includes("not signed into chatgpt") ||
+    normalized.includes("no chatgpt cookies") ||
+    normalized.includes("sign in to chatgpt")
+  );
+}
+
+async function waitForManualLoginOnLiveChrome({
+  host,
+  port,
+  logger,
+  timeoutMs,
+}: {
+  host: string;
+  port: number;
+  logger: BrowserLogger;
+  timeoutMs: number;
+}): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastNotice = 0;
+  while (Date.now() < deadline) {
+    const targets = await listLoginRecoveryTargets(host, port).catch(() => []);
+    for (const target of targets) {
+      let client: ChromeClient | null = null;
+      try {
+        client = (await CDP({
+          host,
+          port,
+          target: target.targetId ?? target.id,
+        })) as ChromeClient;
+        if (await hasRecoveredChatGptComposer(client.Runtime)) {
+          return;
+        }
+      } catch (error) {
+        if (logger.verbose) {
+          logger(
+            `Manual login passive probe failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      } finally {
+        await client?.close().catch(() => undefined);
+      }
+    }
+    const now = Date.now();
+    if (now - lastNotice > 5000) {
+      logger("Manual login mode: waiting in the opened Chrome login tab...");
+      lastNotice = now;
+    }
+    await delay(1000);
+  }
+  throw new BrowserAutomationError(
+    "Manual login mode timed out waiting for ChatGPT session; sign in in the open browser, then resume.",
+    { stage: "login-required" },
+  );
+}
+
+async function hasRecoveredChatGptComposer(Runtime: ChromeClient["Runtime"]): Promise<boolean> {
+  const outcome = await Runtime.evaluate({
+    expression: `(() => {
+      const isVisible = (node) => {
+        if (!(node instanceof HTMLElement)) return false;
+        if (node.closest('[hidden],[aria-hidden="true"],[inert]')) return false;
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && !node.hasAttribute('disabled');
+      };
+      const href = String(location.href || '').toLowerCase();
+      let hostname = '';
+      try {
+        hostname = location.hostname.toLowerCase();
+      } catch {}
+      const text = String(document.body?.textContent || '').toLowerCase();
+      const authPage = href.includes('/auth/') || href.includes('/login') || href.includes('/signin');
+      const expired = text.includes('session has expired');
+      const loginCta = Array.from(document.querySelectorAll('a,button,[role="button"]')).some((node) => {
+        if (!isVisible(node)) return false;
+        const label = String(node.textContent || node.getAttribute('aria-label') || node.getAttribute('title') || '')
+          .toLowerCase()
+          .replace(/\\s+/g, ' ')
+          .trim();
+        return label === 'log in' || label === 'login' || label === 'sign in' || label === 'signin';
+      });
+      const composer = Array.from(document.querySelectorAll('textarea,[contenteditable="true"]')).some(isVisible);
+      return hostname === 'chatgpt.com' && composer && !authPage && !expired && !loginCta;
+    })()`,
+    returnByValue: true,
+  });
+  return outcome.result?.value === true;
+}
+
+async function listLoginRecoveryTargets(
+  host: string,
+  port: number,
+): Promise<Array<{ id?: string; targetId?: string; url?: string; type?: string }>> {
+  const targets = await listRemoteChromeTargets({ host, port });
+  const pages = targets.filter((target) => !target.type || target.type === "page");
+  return pages.filter((target) => isLoginRecoveryUrl(target.url));
+}
+
+function isLoginRecoveryUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return (
+      isAllowedLoginRecoveryHost(parsed.hostname, "chatgpt.com") ||
+      isAllowedLoginRecoveryHost(parsed.hostname, "openai.com") ||
+      isAllowedLoginRecoveryHost(parsed.hostname, "auth0.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedLoginRecoveryHost(hostname: string, domain: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === domain || normalized.endsWith(`.${domain}`);
 }
 
 async function maybeRecoverLongAssistantResponse({
@@ -2570,6 +2780,7 @@ export const __test__ = {
   selectDisposableLaunchTargetIds,
   selectClosableLaunchTargetIds,
   detectHumanInterventionReason,
+  isLoginRecoveryUrl,
   waitForLogin,
 };
 export { syncCookies } from "./cookies.js";
