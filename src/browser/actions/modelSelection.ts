@@ -101,6 +101,7 @@ function buildModelSelectionExpression(
     const INITIAL_WAIT_MS = 150;
     const REOPEN_INTERVAL_MS = 400;
     const MAX_WAIT_MS = 20000;
+    const MODEL_BUTTON_MOUNT_WAIT_MS = 6000;
     const normalize = (value) => {
       if (!value) {
         return '';
@@ -240,12 +241,32 @@ function buildModelSelectionExpression(
       });
     };
 
+    const waitForModelButton = async (timeoutMs = MODEL_BUTTON_MOUNT_WAIT_MS, wake = false) => {
+      const start = performance.now();
+      do {
+        const candidate = findModelButton();
+        if (candidate) return candidate;
+        if (wake) {
+          const wakeResult = await wakeHiddenModelButton();
+          if (wakeResult?.restore && !wakeRestore) {
+            wakeRestore = wakeResult.restore;
+          }
+          if (wakeResult?.button) return wakeResult.button;
+        }
+        await sleep(REOPEN_INTERVAL_MS / 2);
+      } while (performance.now() - start <= timeoutMs);
+      return null;
+    };
+
     let wakeRestore = null;
     let button = findModelButton();
     if (!button) {
       const wake = await wakeHiddenModelButton();
       button = wake?.button ?? null;
       wakeRestore = wake?.restore ?? null;
+    }
+    if (!button && MODEL_STRATEGY !== 'current' && !detectTemporaryChat()) {
+      button = await waitForModelButton(MODEL_BUTTON_MOUNT_WAIT_MS, true);
     }
     if (!button) {
       await wakeRestore?.().catch?.(() => undefined);
@@ -567,6 +588,9 @@ function buildModelMatchersLiteral(targetModel: string) {
   return buildChatGptModelMatchers(targetModel);
 }
 
-export function buildModelSelectionExpressionForTest(targetModel: string): string {
-  return buildModelSelectionExpression(targetModel, "select");
+export function buildModelSelectionExpressionForTest(
+  targetModel: string,
+  strategy: BrowserModelStrategy = "select",
+): string {
+  return buildModelSelectionExpression(targetModel, strategy);
 }

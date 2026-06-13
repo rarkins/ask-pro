@@ -112,9 +112,9 @@ class FakeDocument extends EventTarget {
 const runModelSelectionExpression = async (
   targetModel: string,
   document: FakeDocument,
-  options: { fastTimeout?: boolean; href?: string } = {},
+  options: { fastTimeout?: boolean; href?: string; strategy?: "select" | "current" } = {},
 ) => {
-  const expression = buildModelSelectionExpressionForTest(targetModel);
+  const expression = buildModelSelectionExpressionForTest(targetModel, options.strategy);
   let now = 0;
   const context = createContext({
     document,
@@ -183,10 +183,19 @@ describe("browser model selection matchers", () => {
 
   it("reports temporary chat evidence when the model button is missing", async () => {
     const result = await runModelSelectionExpression("gpt-5.5-pro", new FakeDocument([]), {
+      fastTimeout: true,
       href: "https://chatgpt.com/?temporary-chat=true",
     });
 
     expect(result).toEqual({ status: "button-missing", hint: { temporaryChat: true } });
+  });
+
+  it("does not poll for a missing picker when using the current strategy", async () => {
+    const result = await runModelSelectionExpression("gpt-5.5-pro", new FakeDocument([]), {
+      strategy: "current",
+    });
+
+    expect(result).toEqual({ status: "already-selected", label: "current model" });
   });
 
   it("accepts a generic Pro pill as the latest Pro target", async () => {
@@ -199,6 +208,60 @@ describe("browser model selection matchers", () => {
     });
 
     expect(result).toEqual({ status: "already-selected", label: "Pro" });
+  });
+
+  it("waits for ChatGPT's delayed composer pill before reporting a missing picker", async () => {
+    const modelCandidates: FakeElement[] = [];
+    setTimeout(() => {
+      modelCandidates.push(
+        new FakeElement("Pro Extended", {
+          "aria-haspopup": "menu",
+          class: "__composer-pill __composer-pill--neutral",
+        }),
+      );
+    }, 25);
+
+    const result = await runModelSelectionExpression(
+      "gpt-5.5-pro",
+      new FakeDocument(modelCandidates),
+    );
+
+    expect(result).toEqual({ status: "already-selected", label: "Pro Extended" });
+  });
+
+  it("retries the hidden composer wake while waiting for a delayed picker", async () => {
+    const modelCandidates: FakeElement[] = [];
+    const inputCandidates: FakeElement[] = [];
+    const modelButton = new FakeElement("Model", {
+      "aria-haspopup": "menu",
+      class: "__composer-pill __composer-pill--neutral",
+    });
+    const input = new FakeElement(
+      "",
+      { contenteditable: "true", role: "textbox" },
+      [],
+      undefined,
+      (event) => {
+        if (event.type !== "input") return;
+        if (input.textContent.includes("ask-pro model selection")) {
+          modelCandidates.splice(0, modelCandidates.length, modelButton);
+        }
+      },
+    );
+    setTimeout(() => inputCandidates.push(input), 25);
+    const option = new FakeElement("Pro Extended", {}, [], () => {
+      modelButton.textContent = "Pro Extended";
+      option.setAttribute("aria-checked", "true");
+    });
+    const menu = new FakeElement("", { role: "menu" }, [option]);
+
+    const result = await runModelSelectionExpression(
+      "gpt-5.5-pro",
+      new FakeDocument(modelCandidates, [menu], inputCandidates),
+    );
+
+    expect(result).toEqual({ status: "switched", label: "Pro Extended" });
+    expect(input.textContent).toBe("");
   });
 
   it("does not treat Projects as a generic Pro option", async () => {
@@ -407,6 +470,7 @@ describe("browser model selection matchers", () => {
     const result = await runModelSelectionExpression(
       "Pro",
       new FakeDocument(modelCandidates, [menu], [input]),
+      { fastTimeout: true },
     );
 
     expect(result).toEqual({ status: "switched", label: "Pro" });

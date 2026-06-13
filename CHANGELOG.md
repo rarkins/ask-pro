@@ -44,6 +44,8 @@
 - Treat ChatGPT's current `Intelligence` picker tiers (`Instant`, `Medium`,
   `High`, and `Pro 5+ min`) as the live model selector, with `Pro 5+ min` as
   the Extended Pro thinking target for `--extended`.
+- Wait for ChatGPT's delayed `Pro Extended` composer pill before reporting a
+  missing model selector.
 - Reject non-Extended ask-pro thinking overrides so Heavy/Standard/Light remain
   test-only setup states, never accepted runtime modes.
 - Stop adding the generated response zip request to every wrapper prompt; agents
