@@ -75,6 +75,8 @@
   and recoverability-sensitive runs.
 - Mark context redaction as best-effort in manifests and docs instead of
   overstating strict secret safety.
+- Run all existing non-live browser safety/unit suites in the default local
+  ask-pro test gate.
 
 ### Added
 
