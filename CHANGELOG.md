@@ -80,6 +80,8 @@
   `.ask-pro/sessions/<id>` helper that rejects path-like values.
 - Run all existing non-live browser safety/unit suites in the default local
   ask-pro test gate.
+- Clarify manual recovery copy so user-facing hints name only `--copy` for
+  answer-bearing copy targets and `--harvest` for raw answers.
 
 ### Added
 
