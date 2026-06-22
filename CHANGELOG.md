@@ -6,6 +6,7 @@
 
 - Emphasize in the ask-pro skill that Pro starts with zero caller context and
   long runs should not be killed before a 3-hour wait window.
+- Keep Chrome's background CPU protections enabled for long ask-pro waits.
 - Add the ask-pro logo as the Codex marketplace plugin icon and keep its
   manifest path validator-clean.
 - Refresh root-level plugin assets into the local Codex plugin cache.

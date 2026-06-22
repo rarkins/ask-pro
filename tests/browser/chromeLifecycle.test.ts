@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import {
+  buildChromeLaunchFlags,
   buildChromeFlags,
   restoreChromeWindowByPid,
   shouldLaunchChromeMinimized,
@@ -42,6 +43,16 @@ describe("chrome lifecycle window restore", () => {
 });
 
 describe("chrome lifecycle launch window state", () => {
+  test("keeps Chrome CPU protections enabled for long headed waits", () => {
+    const flags = buildChromeLaunchFlags(buildChromeFlags(false, undefined, "en-US,en"));
+
+    expect(flags).toContain("--disable-extensions");
+    expect(flags).not.toContain("--disable-backgrounding-occluded-windows");
+    expect(flags).not.toContain("--disable-renderer-backgrounding");
+    expect(flags).not.toContain("--disable-background-timer-throttling");
+    expect(flags).not.toContain("--disable-ipc-flooding-protection");
+  });
+
   test("adds start-minimized for headed Windows managed launches", () => {
     expect(buildChromeFlags(false, undefined, "en-US,en", { startMinimized: true })).toContain(
       "--start-minimized",

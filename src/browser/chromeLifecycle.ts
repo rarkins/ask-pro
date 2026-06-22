@@ -11,6 +11,12 @@ import { cleanupStaleProfileState } from "./profileState.js";
 import { delay } from "./utils.js";
 
 const execFileAsync = promisify(execFile);
+const CPU_THROTTLING_OVERRIDE_FLAGS = new Set([
+  "--disable-backgrounding-occluded-windows",
+  "--disable-renderer-backgrounding",
+  "--disable-background-timer-throttling",
+  "--disable-ipc-flooding-protection",
+]);
 
 export async function launchChrome(
   config: ResolvedBrowserConfig,
@@ -20,11 +26,10 @@ export async function launchChrome(
   const connectHost = resolveRemoteDebugHost();
   const debugBindAddress = connectHost && connectHost !== "127.0.0.1" ? "0.0.0.0" : connectHost;
   const debugPort = config.debugPort ?? parseDebugPortEnv();
-  const chromeFlags = buildChromeFlags(
-    config.headless ?? false,
-    debugBindAddress,
-    config.acceptLanguage,
-    { startMinimized: shouldLaunchChromeMinimized(config) },
+  const chromeFlags = buildChromeLaunchFlags(
+    buildChromeFlags(config.headless ?? false, debugBindAddress, config.acceptLanguage, {
+      startMinimized: shouldLaunchChromeMinimized(config),
+    }),
   );
   const usePatchedLauncher = Boolean(connectHost && connectHost !== "127.0.0.1");
   const launcher = usePatchedLauncher
@@ -39,6 +44,7 @@ export async function launchChrome(
         chromePath: config.chromePath ?? undefined,
         chromeFlags,
         userDataDir,
+        ignoreDefaultFlags: true,
         handleSIGINT: false,
         port: debugPort ?? undefined,
       });
@@ -661,7 +667,6 @@ export function buildChromeFlags(
   const primaryLanguage = acceptLanguage.split(",", 1)[0]?.trim() || "en-US";
   const flags = [
     "--disable-background-networking",
-    "--disable-background-timer-throttling",
     "--disable-breakpad",
     "--disable-client-side-phishing-detection",
     "--disable-default-apps",
@@ -695,6 +700,13 @@ export function buildChromeFlags(
   }
 
   return flags;
+}
+
+export function buildChromeLaunchFlags(askProFlags: string[]): string[] {
+  return [
+    ...Launcher.defaultFlags().filter((flag) => !CPU_THROTTLING_OVERRIDE_FLAGS.has(flag)),
+    ...askProFlags.filter((flag) => !CPU_THROTTLING_OVERRIDE_FLAGS.has(flag)),
+  ];
 }
 
 export function shouldLaunchChromeMinimized(
@@ -775,6 +787,7 @@ async function launchWithCustomHost({
     chromePath: chromePath ?? undefined,
     chromeFlags,
     userDataDir,
+    ignoreDefaultFlags: true,
     handleSIGINT: false,
     port: requestedPort ?? undefined,
   });
