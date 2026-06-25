@@ -22,6 +22,7 @@ import {
   closeRemoteChromeTarget,
   closeChromeGracefully,
   listRemoteChromeTargets,
+  releaseManagedChromeResources,
   restoreChromeWindowByPid,
   shouldLaunchChromeMinimized,
 } from "./chromeLifecycle.js";
@@ -1653,7 +1654,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
           // ignore close failures
         }
       } else if (!connectionClosedUnexpectedly && reusedChrome) {
-        releaseChromeProcessHandle(chrome);
+        releaseManagedChromeResources(chrome);
         logger(`Reused Chrome left running on port ${chrome.port} with profile ${userDataDir}`);
       }
       if (manualLogin) {
@@ -1684,28 +1685,10 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
         logger(`Cleanup ${runStatus} • ${totalSeconds.toFixed(1)}s total`);
       }
     } else if (!connectionClosedUnexpectedly) {
-      releaseChromeProcessHandle(chrome);
+      releaseManagedChromeResources(chrome);
       logger(`Chrome left running on port ${chrome.port} with profile ${userDataDir}`);
     }
   }
-}
-
-function releaseChromeProcessHandle(chrome: LaunchedChrome | null | undefined): void {
-  const child = chrome?.process as
-    | (NonNullable<LaunchedChrome["process"]> & {
-        stdin?: { unref?: () => void };
-        stdout?: { unref?: () => void };
-        stderr?: { unref?: () => void };
-        stdio?: Array<{ unref?: () => void } | null | undefined>;
-      })
-    | undefined;
-  child?.stdin?.unref?.();
-  child?.stdout?.unref?.();
-  child?.stderr?.unref?.();
-  for (const stream of child?.stdio ?? []) {
-    stream?.unref?.();
-  }
-  child?.unref?.();
 }
 
 const DEFAULT_DEBUG_PORT = 9222;

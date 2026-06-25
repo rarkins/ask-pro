@@ -1,11 +1,11 @@
+import fs, { readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { readFileSync } from "node:fs";
 import os from "node:os";
 import net from "node:net";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import CDP from "chrome-remote-interface";
-import { launch, Launcher, type LaunchedChrome } from "chrome-launcher";
+import { Launcher, type LaunchedChrome } from "chrome-launcher";
 import type { BrowserLogger, ResolvedBrowserConfig, ChromeClient } from "./types.js";
 import { cleanupStaleProfileState } from "./profileState.js";
 import { delay } from "./utils.js";
@@ -32,22 +32,13 @@ export async function launchChrome(
     }),
   );
   const usePatchedLauncher = Boolean(connectHost && connectHost !== "127.0.0.1");
-  const launcher = usePatchedLauncher
-    ? await launchWithCustomHost({
-        chromeFlags,
-        chromePath: config.chromePath ?? undefined,
-        userDataDir,
-        host: connectHost ?? "127.0.0.1",
-        requestedPort: debugPort ?? undefined,
-      })
-    : await launch({
-        chromePath: config.chromePath ?? undefined,
-        chromeFlags,
-        userDataDir,
-        ignoreDefaultFlags: true,
-        handleSIGINT: false,
-        port: debugPort ?? undefined,
-      });
+  const launcher = await launchManagedChrome({
+    chromeFlags,
+    chromePath: config.chromePath ?? undefined,
+    userDataDir,
+    host: usePatchedLauncher ? (connectHost ?? "127.0.0.1") : null,
+    requestedPort: debugPort ?? undefined,
+  });
   const pidLabel = typeof launcher.pid === "number" ? ` (pid ${launcher.pid})` : "";
   const hostLabel = connectHost ? ` on ${connectHost}` : "";
   logger(`Launched Chrome${pidLabel} on port ${launcher.port}${hostLabel}`);
@@ -159,7 +150,7 @@ export async function closeChromeGracefully(
       }
       await waitForChromeExit(chrome.pid, 2500);
       if (!chrome.pid || !isPidAlive(chrome.pid)) {
-        chrome.process?.unref?.();
+        releaseManagedChromeResources(chrome);
         return;
       }
       logger?.("Chrome did not exit after Browser.close; terminating process.");
@@ -171,7 +162,36 @@ export async function closeChromeGracefully(
     }
   }
   await chrome.kill();
-  chrome.process?.unref?.();
+  releaseManagedChromeResources(chrome);
+}
+
+export function releaseManagedChromeResources(chrome: LaunchedChrome | null | undefined): void {
+  // Local fork behavior: after successful Browser.close, chrome-launcher does not
+  // run its kill/destroy path, so its log descriptors can keep ask-pro's Node
+  // process alive even though Chrome has exited. Close what our managed launcher
+  // exposes, then unref any child-process streams that remain.
+  const managedChrome = chrome as
+    | (LaunchedChrome & {
+        cleanupLauncherLogs?: () => void;
+      })
+    | null
+    | undefined;
+  managedChrome?.cleanupLauncherLogs?.();
+  const child = chrome?.process as
+    | (NonNullable<LaunchedChrome["process"]> & {
+        stdin?: { unref?: () => void };
+        stdout?: { unref?: () => void };
+        stderr?: { unref?: () => void };
+        stdio?: Array<{ unref?: () => void } | null | undefined>;
+      })
+    | undefined;
+  child?.stdin?.unref?.();
+  child?.stdout?.unref?.();
+  child?.stderr?.unref?.();
+  for (const stream of child?.stdio ?? []) {
+    stream?.unref?.();
+  }
+  child?.unref?.();
 }
 
 async function waitForChromeExit(pid: number | undefined, timeoutMs: number): Promise<void> {
@@ -799,7 +819,7 @@ function isWsl(): boolean {
   return release.toLowerCase().includes("microsoft");
 }
 
-async function launchWithCustomHost({
+async function launchManagedChrome({
   chromeFlags,
   chromePath,
   userDataDir,
@@ -852,13 +872,38 @@ async function launchWithCustomHost({
 
   await launcher.launch();
 
-  const kill = async () => launcher.kill();
+  const cleanupLauncherLogs = () => closeLauncherLogFiles(launcher);
+  const kill = async () => {
+    try {
+      launcher.kill();
+    } finally {
+      cleanupLauncherLogs();
+    }
+  };
   return {
     pid: launcher.pid ?? undefined,
     port: launcher.port ?? 0,
     process: launcher.chromeProcess as unknown as NonNullable<LaunchedChrome["process"]>,
     kill,
+    cleanupLauncherLogs,
     host: host ?? undefined,
     remoteDebuggingPipes: launcher.remoteDebuggingPipes,
   } as unknown as LaunchedChrome & { host?: string };
+}
+
+function closeLauncherLogFiles(launcher: Launcher): void {
+  const launcherWithLogs = launcher as unknown as {
+    outFile?: number;
+    errFile?: number;
+  };
+  for (const key of ["outFile", "errFile"] as const) {
+    const fd = launcherWithLogs[key];
+    if (typeof fd !== "number") continue;
+    try {
+      fs.closeSync(fd);
+    } catch {
+      // Already closed by chrome-launcher or the OS; cleanup stays best-effort.
+    }
+    delete launcherWithLogs[key];
+  }
 }

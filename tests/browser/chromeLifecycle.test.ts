@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import {
   buildChromeLaunchFlags,
   buildChromeFlags,
+  releaseManagedChromeResources,
   restoreChromeWindowByPid,
   shouldLaunchChromeMinimized,
 } from "../../src/browser/chromeLifecycle.js";
@@ -134,5 +135,28 @@ describe("chrome lifecycle launch window state", () => {
         "win32",
       ),
     ).toBe(false);
+  });
+});
+
+describe("chrome lifecycle resource cleanup", () => {
+  test("closes exposed launcher logs and unrefs child streams", () => {
+    const cleanupLauncherLogs = vi.fn();
+    const unref = vi.fn();
+    const streamUnref = vi.fn();
+
+    releaseManagedChromeResources({
+      cleanupLauncherLogs,
+      process: {
+        unref,
+        stdin: { unref: streamUnref },
+        stdout: { unref: streamUnref },
+        stderr: { unref: streamUnref },
+        stdio: [{ unref: streamUnref }, null, undefined],
+      },
+    } as never);
+
+    expect(cleanupLauncherLogs).toHaveBeenCalledOnce();
+    expect(streamUnref).toHaveBeenCalledTimes(4);
+    expect(unref).toHaveBeenCalledOnce();
   });
 });

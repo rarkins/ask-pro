@@ -10,6 +10,8 @@
   reused-profile runs, so other agents cannot accidentally attach to it later.
 - Point the plugin marketplace, package metadata, and install docs at the
   `rarkins/ask-pro` fork so local installs stay on the customized source.
+- Release managed Chrome launcher log handles after graceful browser shutdown
+  so completed CLI runs exit instead of lingering in the background.
 - Reject Windows-drive rooted `--files` glob alternatives consistently on
   non-Windows hosts instead of treating them as project-relative paths.
 - Emphasize in the ask-pro skill that Pro starts with zero caller context and
