@@ -7,6 +7,23 @@ import {
 } from "../../src/browser/chromeLifecycle.js";
 
 describe("chrome lifecycle window restore", () => {
+  test("uses a macOS pid fallback to restore hidden Chrome windows", async () => {
+    const execFileAsync = vi.fn().mockResolvedValue({ stdout: "", stderr: "" });
+    const logger = vi.fn<(message: string) => void>();
+
+    const restored = await restoreChromeWindowByPid(1234, logger, {
+      platform: "darwin",
+      execFileAsync: execFileAsync as never,
+    });
+
+    expect(restored).toBe(true);
+    expect(execFileAsync).toHaveBeenCalledWith("osascript", ["-e", expect.any(String)]);
+    const script = execFileAsync.mock.calls[0]?.[1]?.at(-1);
+    expect(script).toContain("unix id is 1234");
+    expect(script).toContain("set visible of targetProcess to true");
+    expect(logger).toHaveBeenCalledWith("Chrome window restored for human action");
+  });
+
   test("uses a Windows pid fallback to restore retained Chrome windows", async () => {
     const execFileAsync = vi.fn().mockResolvedValue({ stdout: "", stderr: "" });
     const logger = vi.fn<(message: string) => void>();
@@ -28,7 +45,7 @@ describe("chrome lifecycle window restore", () => {
     expect(logger).toHaveBeenCalledWith("[browser] Chrome window restored by pid fallback");
   });
 
-  test("does not run the Windows restore fallback on other platforms", async () => {
+  test("does not run a restore fallback on Linux", async () => {
     const execFileAsync = vi.fn();
     const logger = vi.fn<(message: string) => void>();
 

@@ -140,6 +140,8 @@ describe("ask-pro browser runner", () => {
     expect(firstCall?.[0]).toMatchObject({
       config: {
         manualLoginProfileDir: browserProfile,
+        hideWindow: false,
+        keepBrowser: false,
         startMinimized: false,
       },
     });
@@ -175,6 +177,8 @@ describe("ask-pro browser runner", () => {
     expect(firstCall?.[0]).toMatchObject({
       config: {
         manualLoginProfileDir: browserProfile,
+        hideWindow: process.platform === "darwin",
+        keepBrowser: false,
         startMinimized: true,
       },
     });

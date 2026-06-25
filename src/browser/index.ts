@@ -227,7 +227,10 @@ function shouldCloseManagedChromeOnCleanup(config: {
   keepBrowserOpen?: boolean;
   connectionClosedUnexpectedly?: boolean;
 }): boolean {
-  return !config.reusedChrome && !config.keepBrowserOpen && !config.connectionClosedUnexpectedly;
+  // Local fork behavior: a successful ask-pro run should fully quit the managed
+  // profile even when this invocation reused an existing ask-pro Chrome. Leaving
+  // that browser alive has caused other agents to attach to it by mistake.
+  return !config.keepBrowserOpen && !config.connectionClosedUnexpectedly;
 }
 
 function shouldCleanupManualLoginStateOnCleanup(config: {

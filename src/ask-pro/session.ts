@@ -694,7 +694,17 @@ function segmentContainsEmptyCapableExtglob(segment: string): boolean {
 }
 
 function assertNoRootedGlobAlternative(pattern: string, originalPattern: string): void {
-  if (/[,(|](?:\/|[A-Za-z]:\/)/.test(pattern)) {
+  // Reject rooted alternatives lexically before host path APIs see them: on
+  // POSIX, a Windows drive root such as C:/outside otherwise looks relative,
+  // while normal absolute paths still flow through the real inside-cwd checks.
+  const hasLeadingRoot = /^(?:\/|[A-Za-z]:\/)/.test(pattern);
+  const hasRootedNestedAlternative = /[,(|](?:\/|[A-Za-z]:\/)/.test(pattern);
+  const isWindowsRootOnNonWindowsHost = /^[A-Za-z]:\//.test(pattern) && !path.isAbsolute(pattern);
+  if (
+    (pattern !== originalPattern && hasLeadingRoot) ||
+    hasRootedNestedAlternative ||
+    isWindowsRootOnNonWindowsHost
+  ) {
     throw new Error(`--files path must be inside the project cwd: ${originalPattern}`);
   }
 }

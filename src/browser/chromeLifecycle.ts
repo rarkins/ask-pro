@@ -51,6 +51,12 @@ export async function launchChrome(
   const pidLabel = typeof launcher.pid === "number" ? ` (pid ${launcher.pid})` : "";
   const hostLabel = connectHost ? ` on ${connectHost}` : "";
   logger(`Launched Chrome${pidLabel} on port ${launcher.port}${hostLabel}`);
+  // Local fork behavior: macOS has no reliable Chrome launch flag equivalent to
+  // Windows --start-minimized, so hide the window as soon as the launcher gives
+  // us a process. Auth/recovery paths can restore it when human action is needed.
+  if (config.hideWindow && !config.headless) {
+    await hideChromeWindow(launcher, logger);
+  }
   return Object.assign(launcher, { host: connectHost ?? "127.0.0.1" }) as LaunchedChrome & {
     host?: string;
   };
@@ -225,6 +231,29 @@ export async function restoreChromeWindowByPid(
 ): Promise<boolean> {
   const platform = deps.platform ?? process.platform;
   const runExecFile = deps.execFileAsync ?? execFileAsync;
+  if (platform === "darwin" && pid) {
+    // Local fork behavior: hidden macOS ask-pro windows must be recoverable for
+    // login, MFA, Cloudflare, or incomplete-answer debugging that needs a human.
+    const script = `tell application "System Events"
+      try
+        set targetProcess to first process whose unix id is ${pid}
+        set visible of targetProcess to true
+        set frontmost of targetProcess to true
+        return "restored"
+      on error
+        return "missing"
+      end try
+    end tell`;
+    try {
+      await runExecFile("osascript", ["-e", script]);
+      logger("Chrome window restored for human action");
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger(`Failed to restore Chrome window: ${message}`);
+      return false;
+    }
+  }
   if (platform !== "win32" || !pid) {
     return false;
   }

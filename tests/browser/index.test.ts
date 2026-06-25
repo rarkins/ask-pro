@@ -201,14 +201,14 @@ describe("managed Chrome cleanup ownership", () => {
     ).toBe(true);
   });
 
-  test("leaves reused shared Chrome running after closing the run tab", () => {
+  test("closes reused managed Chrome after closing the run tab", () => {
     expect(
       __test__.shouldCloseManagedChromeOnCleanup({
         reusedChrome: true,
         keepBrowserOpen: false,
         connectionClosedUnexpectedly: false,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   test("does not close Chrome when retained or already disconnected", () => {

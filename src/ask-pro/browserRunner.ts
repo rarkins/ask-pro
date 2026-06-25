@@ -74,6 +74,10 @@ export async function runAskProBrowserSession({
         : (metadata?.url ?? ASK_PRO_TEMPORARY_CHATGPT_URL));
   await fs.mkdir(browserProfile, { recursive: true });
   const startMinimized = allowStartMinimized && (await hasAuthReadyMarker(browserProfile));
+  // Local fork behavior: after this managed profile has been authenticated once,
+  // hide macOS Chrome so background ask-pro consults do not steal focus from
+  // the user's active work. First-login and recovery runs stay visible.
+  const hideAuthReadyMacWindow = startMinimized && process.platform === "darwin";
   await writeAskProBrowserMetadata({
     cwd,
     sessionId,
@@ -117,7 +121,12 @@ export async function runAskProBrowserSession({
         thinkingTime: requestedThinkingTime,
         acceptLanguage: ASK_PRO_ACCEPT_LANGUAGE,
         startMinimized,
-        keepBrowser: true,
+        hideWindow: hideAuthReadyMacWindow,
+        // Local fork behavior: quit the managed Chrome after successful runs so
+        // later agents cannot accidentally attach to ask-pro's profile instead
+        // of the user's main Chrome. Recovery/incomplete runs can still opt in
+        // to retention through keepBrowserOpen.
+        keepBrowser: false,
         allowCookieErrors: true,
       },
       log: logger,

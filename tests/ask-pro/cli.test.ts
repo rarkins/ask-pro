@@ -1002,10 +1002,12 @@ describe("ask-pro cli", () => {
     );
     expect(JSON.parse(statusRaw)).toMatchObject({
       resumeCommand: expect.stringMatching(
-        /^npm exec --yes pnpm@10\.33\.2 -- --dir "C:\/Code\/ask-pro" start -- --cwd ".+" --extended --resume /,
+        // POSIX shells use single quotes while Windows uses double quotes for
+        // the generated --cwd argument; the launcher shape is what matters.
+        /^npm exec --yes pnpm@10\.33\.2 -- --dir "C:\/Code\/ask-pro" start -- --cwd ['"].+['"] --extended --resume /,
       ),
       harvestCommand: expect.stringMatching(
-        /^npm exec --yes pnpm@10\.33\.2 -- --dir "C:\/Code\/ask-pro" start -- --cwd ".+" --harvest /,
+        /^npm exec --yes pnpm@10\.33\.2 -- --dir "C:\/Code\/ask-pro" start -- --cwd ['"].+['"] --harvest /,
       ),
     });
   }, 30000);
