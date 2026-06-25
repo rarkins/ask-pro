@@ -81,6 +81,11 @@ program
   });
 
 await program.parseAsync(process.argv);
+// Local fork behavior: browser automation dependencies can leave platform
+// handles referenced after the command has completed. Flush command output, then
+// exit explicitly so successful ask-pro runs do not linger in the background.
+await flushStandardStreams();
+process.exit(process.exitCode ?? 0);
 
 async function runAskPro(question: string, options: AskProOptions): Promise<void> {
   const cwd = resolveProjectCwd(options);
@@ -223,6 +228,16 @@ async function readStdin(): Promise<string> {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks).toString("utf8");
+}
+
+async function flushStandardStreams(): Promise<void> {
+  await Promise.all([flushWritable(process.stdout), flushWritable(process.stderr)]);
+}
+
+async function flushWritable(stream: NodeJS.WriteStream): Promise<void> {
+  await new Promise<void>((resolve) => {
+    stream.write("", () => resolve());
+  });
 }
 
 function optionSessionId(value: string | boolean | undefined): string | undefined {
