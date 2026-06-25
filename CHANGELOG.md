@@ -8,6 +8,8 @@
   do not steal focus from the user's active work.
 - Quit the managed ask-pro Chrome profile after successful runs, including
   reused-profile runs, so other agents cannot accidentally attach to it later.
+- Point the plugin marketplace, package metadata, and install docs at the
+  `rarkins/ask-pro` fork so local installs stay on the customized source.
 - Reject Windows-drive rooted `--files` glob alternatives consistently on
   non-Windows hosts instead of treating them as project-relative paths.
 - Emphasize in the ask-pro skill that Pro starts with zero caller context and

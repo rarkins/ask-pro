@@ -13,7 +13,7 @@ code automatically.
 Add this repository as a Codex plugin marketplace:
 
 ```powershell
-codex plugin marketplace add https://github.com/Pimpmuckl/ask-pro --ref main
+codex plugin marketplace add https://github.com/rarkins/ask-pro --ref main
 ```
 
 Then open `/plugins`, install `ask-pro`, and start a new Codex thread. Refresh
